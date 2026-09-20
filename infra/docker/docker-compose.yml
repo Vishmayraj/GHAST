@@ -1,0 +1,42 @@
+# Stage 1 local dev environment.
+#
+# Brings up the infra dependencies the Stage 1 services need: TimescaleDB
+# (Postgres + PostGIS + TimescaleDB, for spatio-temporal vessel-track
+# storage) and MinIO (S3-compatible object storage, for the raw AIS
+# archive). Application services (ingestion, ml training, backend, frontend)
+# get their own service blocks added here as each one lands - see
+# infra/docker/README.md.
+#
+# Usage: docker compose -f infra/docker/docker-compose.yml up -d
+
+services:
+  timescaledb:
+    image: timescale/timescaledb-ha:pg16
+    container_name: ghast-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ghast}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ghast}
+      POSTGRES_DB: ${POSTGRES_DB:-ghast}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - timescaledb_data:/home/postgres/pgdata/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: ghast-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ghast}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ghast12345}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  timescaledb_data:
+  minio_data:
