@@ -1,13 +1,13 @@
 # Stage 1 local dev environment.
 #
-# Brings up the infra dependencies the Stage 1 services need: TimescaleDB
-# (Postgres + PostGIS + TimescaleDB, for spatio-temporal vessel-track
-# storage) and MinIO (S3-compatible object storage, for the raw AIS
-# archive). Application services (ingestion, ml training, backend, frontend)
-# get their own service blocks added here as each one lands - see
-# infra/docker/README.md.
+# Brings up TimescaleDB (Postgres + PostGIS + TimescaleDB, for spatio-temporal
+# vessel-track storage), MinIO (S3-compatible object storage, for the raw AIS
+# archive), and the ingestion service (AIS Stream -> normalize -> TimescaleDB).
+# Remaining application services (ml training, backend, frontend) get their
+# own service blocks added here as each one lands - see infra/docker/README.md.
 #
 # Usage: docker compose -f infra/docker/docker-compose.yml up -d
+# Requires AISSTREAM_API_KEY in infra/docker/.env - see infra/docker/README.md.
 
 services:
   timescaledb:
@@ -36,6 +36,26 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
+
+  ingestion:
+    build:
+      context: ../..
+      dockerfile: ingestion/Dockerfile
+    container_name: ghast-ingestion
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - minio
+    environment:
+      AISSTREAM_API_KEY: ${AISSTREAM_API_KEY:?set AISSTREAM_API_KEY in infra/docker/.env}
+      AISSTREAM_BOUNDING_BOXES: ${AISSTREAM_BOUNDING_BOXES:-}
+      AISSTREAM_FILTER_MMSI: ${AISSTREAM_FILTER_MMSI:-}
+      AISSTREAM_FILTER_MESSAGE_TYPES: ${AISSTREAM_FILTER_MESSAGE_TYPES:-}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-ghast}:${POSTGRES_PASSWORD:-ghast}@timescaledb:5432/${POSTGRES_DB:-ghast}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ghast}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ghast12345}
+      MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-ghast-raw-ais}
 
 volumes:
   timescaledb_data:
