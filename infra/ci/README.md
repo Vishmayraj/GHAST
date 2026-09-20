@@ -1,3 +1,3 @@
 # infra/ci/
 
-GitHub Actions workflows. Empty for now on purpose: there's no code to lint/test/build yet as of this scaffold. The first workflow (lint + test for whichever service lands first, per `ImplementationPlans/Sem5IP.md`) goes here rather than being pre-built against nothing.
+GitHub Actions only reads workflow files from `.github/workflows/` at the repo root - that's where the actual workflows live (starting with `.github/workflows/ingestion-tests.yml`, added once `ingestion/` had real code and tests). `infra/ci/` stays as the place for anything CI-related that isn't itself a workflow file: shared scripts, composite actions, or notes a workflow references, if that need comes up. Nothing here yet for that reason, not because CI doesn't exist.
