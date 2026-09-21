@@ -1,4 +1,8 @@
 raw/*
 !raw/README.md
+
 research_datasets/*
 !research_datasets/README.md
+!research_datasets/gps_spoofing_mass/
+research_datasets/gps_spoofing_mass/*
+!research_datasets/gps_spoofing_mass/fetch.sh
