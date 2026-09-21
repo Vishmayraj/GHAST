@@ -6,4 +6,4 @@ The detection layer: trajectory-anomaly models that score incoming vessel tracks
 - `models/bilstm/` — Stage 1 trajectory anomaly model.
 - `models/clustering/` — scaffolded now, wired up in Stage 2.
 - `training/` — training scripts and MLflow configs.
-- `evaluation/` — benchmark scripts against published baselines.
+- `evaluation/` — precision/recall/F1 harness, built ahead of the model itself (Weeks 5-6) so every training run has a number to report.
