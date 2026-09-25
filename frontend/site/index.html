@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GHAST — GNSS &amp; AIS Hazardous Spoofing Tracker</title>
+  <meta name="description" content="GHAST detects GNSS/AIS spoofing and jamming from vessel trajectory behavior, then turns flagged anomalies into evidence-backed incident reports." />
+
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/hero.css" />
+
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+
+  <!-- ============ HERO: scroll-controlled cinematic opening ============ -->
+  <section class="hero" data-hero aria-label="GHAST introduction">
+    <div class="hero__sticky" data-hero-pin>
+      <video
+        class="hero__video"
+        data-hero-video
+        muted
+        playsinline
+        preload="auto"
+        aria-hidden="true"
+      >
+        <source src="../assets/ghast-hero.webm" type="video/webm" />
+        <source src="../assets/ghast-hero.mp4" type="video/mp4" />
+      </video>
+      <div class="hero__scrim"></div>
+      <div class="hero__content" data-hero-content>
+        <p class="hero__kicker">GHAST — GNSS &amp; AIS Hazardous Spoofing Tracker</p>
+        <h1 class="hero__title">A vessel behaves normally. Then it doesn&rsquo;t.</h1>
+        <p class="hero__sub">Scroll to watch the anomaly unfold.</p>
+        <p class="hero__scroll-cue">scroll</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="hero-wash" aria-hidden="true">
+    <div class="hero-wash__grid"></div>
+  </div>
+
+  <!-- Remaining sections are added in subsequent commits. -->
+  <main id="main"></main>
+
+  <script src="scripts/scroll-hero.js"></script>
+</body>
+</html>

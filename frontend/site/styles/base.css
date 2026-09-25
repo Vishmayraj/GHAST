@@ -1,0 +1,140 @@
+/* Reset + base rendering */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--step-body);
+  line-height: var(--lh-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+img,
+video {
+  max-width: 100%;
+  display: block;
+}
+
+h1,
+h2,
+h3,
+p,
+figure {
+  margin: 0;
+}
+
+h1,
+h2,
+h3 {
+  line-height: var(--lh-tight);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+a {
+  color: inherit;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Layout primitives */
+.section {
+  padding: var(--space-24) var(--space-6);
+  position: relative;
+}
+
+.section__inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
+}
+
+.section__inner--narrow {
+  max-width: var(--content-narrow);
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-mono);
+  font-size: var(--step-ticker);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ocean-600);
+  margin-bottom: var(--space-4);
+}
+
+.eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.section__title {
+  font-size: var(--step-h2);
+  max-width: 34ch;
+}
+
+.section__lede {
+  font-size: var(--step-lede);
+  color: var(--color-text-muted);
+  max-width: 56ch;
+  margin-top: var(--space-4);
+  line-height: var(--lh-loose);
+}
+
+/* Scroll-reveal: progressively enhanced, inert without JS */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+}
+
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+.no-js [data-reveal],
+[data-reveal].is-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+::selection {
+  background: var(--ocean-200);
+  color: var(--ocean-950);
+}

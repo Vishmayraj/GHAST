@@ -1,0 +1,155 @@
+/*
+ * Scroll-controlled cinematic hero.
+ *
+ * Structure: a tall wrapper (.hero, height = N*100vh) gives the user
+ * scroll distance to scrub through. Inside it, .hero__sticky pins to
+ * the viewport (position: sticky) so the video stays visually fixed
+ * while that distance is consumed. scroll-hero.js maps scroll
+ * progress within the wrapper to the video's currentTime — the user
+ * is scrolling their own page normally; nothing hijacks the wheel.
+ */
+
+.hero {
+  position: relative;
+  height: 420vh;
+  background: var(--ocean-950);
+}
+
+.hero__sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+}
+
+.hero__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: var(--ocean-950);
+}
+
+/* Soft lower scrim so overlay text stays legible against bright water */
+.hero__scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to top,
+    rgba(4, 29, 38, 0.65) 0%,
+    rgba(4, 29, 38, 0.15) 38%,
+    rgba(4, 29, 38, 0) 62%
+  );
+  pointer-events: none;
+}
+
+.hero__content {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding: 0 var(--space-6) var(--space-16);
+  max-width: var(--content-max);
+  margin: 0 auto;
+  color: var(--color-text-on-ocean);
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+}
+
+.hero__content.is-active {
+  opacity: 1;
+  transform: none;
+}
+
+.hero__kicker {
+  font-family: var(--font-mono);
+  font-size: var(--step-ticker);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ocean-200);
+  margin: 0 0 var(--space-4);
+}
+
+.hero__title {
+  font-size: var(--step-h1);
+  max-width: 16ch;
+  color: var(--paper-0);
+}
+
+.hero__sub {
+  margin-top: var(--space-4);
+  font-size: var(--step-lede);
+  color: var(--ocean-100);
+  max-width: 40ch;
+}
+
+.hero__scroll-cue {
+  margin-top: var(--space-12);
+  font-family: var(--font-mono);
+  font-size: var(--step-ticker);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ocean-200);
+  opacity: 0.85;
+  animation: hero-cue-bob 2.2s var(--ease-out) infinite;
+}
+
+@keyframes hero-cue-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
+}
+
+/* The final frame of the video matches the first: empty, even ocean.
+   This wash section continues that exact color as a flat field so
+   the cut from "video ends" to "page continues" reads as one
+   surface, not a scene change. */
+.hero-wash {
+  background: linear-gradient(180deg, var(--ocean-500) 0%, var(--ocean-100) 100%);
+  height: 34vh;
+  position: relative;
+}
+
+.hero-wash__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--color-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  opacity: 0.4;
+  mask-image: linear-gradient(180deg, transparent, black 70%);
+}
+
+@media (max-width: 720px) {
+  .hero {
+    height: 340vh;
+  }
+
+  .hero__title {
+    max-width: 12ch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero {
+    height: auto;
+  }
+
+  .hero__sticky {
+    position: relative;
+    height: 84vh;
+    min-height: 480px;
+  }
+
+  .hero__content {
+    opacity: 1;
+    transform: none;
+  }
+
+  .hero__scroll-cue {
+    display: none;
+  }
+}

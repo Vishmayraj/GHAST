@@ -1,0 +1,88 @@
+/*
+ * Design tokens for the GHAST landing site.
+ *
+ * The palette is built outward from the hero video's ocean color
+ * (#0096c7) rather than treating it as an isolated accent. It sits
+ * between a pale, almost-scientific cyan (used for backgrounds and
+ * fields) and a deep chart-navy (used for text and dense UI), with
+ * a single warm coral reserved exclusively for anomalies/alerts so
+ * it keeps its meaning everywhere it appears.
+ */
+
+:root {
+  /* Ocean scale — anchored on the hero's #0096c7 */
+  --ocean-950: #041d26;
+  --ocean-900: #06283a;
+  --ocean-800: #073b4f;
+  --ocean-700: #0a5270;
+  --ocean-600: #0077a3;
+  --ocean-500: #0096c7; /* hero anchor */
+  --ocean-400: #48b8dd;
+  --ocean-300: #7fd0e8;
+  --ocean-200: #ade5f2;
+  --ocean-100: #caf0f8;
+  --ocean-50:  #eefaff;
+
+  /* Anomaly / alert — used sparingly, only for deviation & anomaly signal */
+  --anomaly-600: #c2410c;
+  --anomaly-500: #ee6c4d;
+  --anomaly-100: #ffe4d6;
+
+  /* Neutrals — warm-cool so it doesn't fight the ocean scale */
+  --ink-900: #0b1a20;
+  --ink-700: #2b3d44;
+  --ink-500: #5c7278;
+  --ink-300: #9fb2b6;
+  --paper-100: #f7faf9;
+  --paper-0: #ffffff;
+
+  /* Semantic roles */
+  --color-bg: var(--paper-100);
+  --color-bg-inverse: var(--ocean-950);
+  --color-surface: var(--paper-0);
+  --color-text: var(--ink-900);
+  --color-text-muted: var(--ink-500);
+  --color-text-on-ocean: var(--ocean-50);
+  --color-accent: var(--ocean-500);
+  --color-anomaly: var(--anomaly-500);
+  --color-border: rgba(7, 59, 79, 0.12);
+  --color-grid-line: rgba(0, 150, 199, 0.16);
+
+  /* Typography */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", system-ui, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+
+  --step-ticker: 0.6875rem;  /* small telemetry labels */
+  --step-body: 1rem;
+  --step-lede: 1.1875rem;
+  --step-h3: 1.5rem;
+  --step-h2: clamp(1.75rem, 1.35rem + 2vw, 2.5rem);
+  --step-h1: clamp(2.25rem, 1.4rem + 4vw, 4rem);
+
+  --lh-tight: 1.1;
+  --lh-normal: 1.5;
+  --lh-loose: 1.7;
+
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  --space-24: 6rem;
+  --space-32: 8rem;
+
+  /* Layout */
+  --content-max: 1120px;
+  --content-narrow: 720px;
+  --radius-sm: 4px;
+  --radius-md: 10px;
+  --radius-lg: 18px;
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 180ms;
+  --dur-med: 420ms;
+}
