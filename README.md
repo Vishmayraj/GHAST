@@ -25,7 +25,7 @@ Brings up TimescaleDB and MinIO for local dev. See `infra/docker/README.md` for 
 | `ml/` | Feature extraction, Bi-LSTM model, training, evaluation |
 | `agent/` | Investigation agent: orchestrator, tools, report generator |
 | `backend/` | FastAPI app + DB models |
-| `frontend/` | React dashboard |
+| `frontend/` | `site/` (public landing site) + `dashboard/` (React analyst dashboard, not started) |
 | `infra/` | Docker (local dev) and CI |
 | `docs/` | Research notes (design doc itself stays in `HLD/`) |
 | `notebooks/` | Exploration notebooks |
