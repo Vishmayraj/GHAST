@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Approach — GHAST</title>
+  <meta name="description" content="How GHAST turns vessel trajectory deviation into an anomaly score, and how it tells targeted spoofing apart from area jamming." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
+  <link rel="stylesheet" href="styles/sections.css" />
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+
+  <nav class="site-nav" aria-label="Primary">
+    <div class="site-nav__inner">
+      <a class="site-nav__brand" href="index.html">
+        <span class="site-nav__brand-mark" aria-hidden="true"></span>
+        GHAST
+      </a>
+      <ul class="site-nav__links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="approach.html" aria-current="page">Approach</a></li>
+        <li><a href="platform.html">Platform</a></li>
+        <li><a href="about.html">About</a></li>
+      </ul>
+      <a class="site-nav__cta" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="page-hero__inner">
+      <p class="page-hero__eyebrow">Detection methodology</p>
+      <h1 class="page-hero__title">A trajectory, not a signature.</h1>
+      <p class="page-hero__lede">
+        GHAST doesn't match against a list of known jamming signatures. It
+        predicts where a vessel should physically be next, and treats a
+        large enough gap between that prediction and what's reported as the
+        signal worth investigating.
+      </p>
+    </div>
+  </header>
+
+  <main class="page-main">
+
+    <section class="section" id="detection" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">Next-state prediction</p>
+        <h2 class="section__title">Predicted position vs. reported position</h2>
+        <p class="section__lede">
+          Given a vessel's recent track — position, speed over ground,
+          course, heading, rate of turn — a sequence model predicts its next
+          plausible state. Reported positions normally track that
+          prediction closely, bounded by the vessel's real physical limits.
+          A deviation that exceeds those limits is the anomaly score.
+        </p>
+
+        <div class="card signal-diagram">
+          <svg viewBox="0 0 640 220" role="img" aria-label="Predicted trajectory diverging from actual reported trajectory, with the gap between them highlighted as a deviation">
+            <line x1="40" y1="190" x2="600" y2="190" stroke="var(--color-border)" stroke-width="1" />
+            <path d="M 40 150 C 160 140, 260 120, 360 108 C 440 98, 520 90, 600 84"
+                  fill="none" stroke="var(--ocean-300)" stroke-width="2.5" stroke-dasharray="6 5" />
+            <path d="M 40 150 C 160 140, 250 118, 320 104 C 400 150, 470 30, 600 20"
+                  fill="none" stroke="var(--ocean-700)" stroke-width="2.5" />
+            <line x1="470" y1="30" x2="470" y2="93" stroke="var(--color-anomaly)" stroke-width="1.5" stroke-dasharray="3 3" />
+            <circle cx="470" cy="30" r="4.5" fill="var(--color-anomaly)" />
+            <circle cx="470" cy="93" r="4.5" fill="var(--ocean-700)" opacity="0.5" />
+            <text x="482" y="55" font-family="var(--font-mono)" font-size="11" fill="var(--color-anomaly)">deviation exceeds</text>
+            <text x="482" y="68" font-family="var(--font-mono)" font-size="11" fill="var(--color-anomaly)">physical turn limit</text>
+          </svg>
+          <div class="signal-diagram__legend">
+            <span><span class="legend-swatch legend-swatch--predicted"></span>predicted next-state</span>
+            <span><span class="legend-swatch legend-swatch--actual"></span>reported track</span>
+            <span><span class="legend-swatch legend-swatch--deviation"></span>flagged deviation</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="background: var(--paper-dim);" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">Fleet-wide check</p>
+        <h2 class="section__title">One vessel, or a whole area?</h2>
+        <p class="section__lede">
+          A flagged deviation on its own doesn't say why. A clustering pass
+          across every vessel currently in the area does: if one vessel is
+          affected while its neighbors track normally, that points to
+          targeted spoofing. If many vessels in the same area flag at once,
+          that points to area jamming instead — a materially different
+          situation for an analyst to walk into.
+        </p>
+
+        <div class="fleet-compare">
+          <div class="card fleet-map" id="fleet-targeted">
+            <div class="fleet-map__svg"></div>
+            <p class="fleet-map__caption">Isolated anomaly</p>
+            <p class="fleet-map__result"></p>
+          </div>
+          <div class="card fleet-map" id="fleet-jamming">
+            <div class="fleet-map__svg"></div>
+            <p class="fleet-map__caption">Widespread anomaly</p>
+            <p class="fleet-map__result"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">Why this works without insurer data</p>
+        <h2 class="section__title">Three public data sources, no proprietary access required</h2>
+        <div class="data-cards">
+          <div class="card data-card">
+            <div class="data-card__index">01</div>
+            <div class="data-card__title">Live public AIS feeds</div>
+            <div class="data-card__body">Real, continuously updating vessel tracks from public terrestrial and satellite AIS sources — no vessel or insurer relationship needed to reach a working system.</div>
+          </div>
+          <div class="card data-card">
+            <div class="data-card__index">02</div>
+            <div class="data-card__title">Public research datasets</div>
+            <div class="data-card__body">Labeled synthetic and real-vs-simulated spoofed-track studies (IEEE DataPort and published literature) ground the model against credible published-level performance.</div>
+          </div>
+          <div class="card data-card">
+            <div class="data-card__index">03</div>
+            <div class="data-card__title">A self-generated incident history</div>
+            <div class="data-card__body">Every investigated anomaly feeds back into the jamming-zone map and incident history — a dataset that only exists because the system has been running.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <div>
+        <div class="site-footer__brand">GHAST</div>
+        <div class="site-footer__status">Stage 1 · Semester 5 · GTU-SET</div>
+      </div>
+      <div>
+        <a class="site-footer__link" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">Source on GitHub</a>
+      </div>
+    </div>
+    <p class="site-footer__meta">Illustrative platform preview — data on this site is mock, not live.</p>
+  </footer>
+
+  <script src="scripts/mock-data.js"></script>
+  <script src="scripts/charts.js"></script>
+  <script src="scripts/sections.js"></script>
+  <script src="scripts/reveal.js"></script>
+</body>
+</html>

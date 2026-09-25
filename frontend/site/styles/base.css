@@ -38,6 +38,7 @@ figure {
 h1,
 h2,
 h3 {
+  font-family: var(--font-display);
   line-height: var(--lh-tight);
   font-weight: 600;
   letter-spacing: -0.01em;
@@ -54,6 +55,45 @@ a {
   overflow: hidden;
   clip: rect(0 0 0 0);
   white-space: nowrap;
+}
+
+/* Non-hero pages: push content below the fixed nav bar. */
+.page-main {
+  padding-top: var(--nav-height);
+}
+
+.page-hero {
+  background: var(--c-navy);
+  color: var(--color-text-on-navy);
+  padding: calc(var(--nav-height) + var(--space-16)) var(--space-6) var(--space-16);
+}
+
+.page-hero__eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--step-ticker);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ocean-300);
+}
+
+.page-hero__title {
+  margin-top: var(--space-3);
+  font-size: var(--step-h1);
+  color: var(--paper);
+  max-width: 20ch;
+}
+
+.page-hero__lede {
+  margin-top: var(--space-4);
+  font-size: var(--step-lede);
+  color: var(--color-text-on-navy-muted);
+  max-width: 56ch;
+  line-height: var(--lh-loose);
+}
+
+.page-hero__inner {
+  max-width: var(--content-max);
+  margin: 0 auto;
 }
 
 /* Layout primitives */
@@ -136,5 +176,5 @@ a {
 
 ::selection {
   background: var(--ocean-200);
-  color: var(--ocean-950);
+  color: var(--c-navy);
 }

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About — GHAST</title>
+  <meta name="description" content="Why GHAST predicts vessel behavior instead of matching signatures, and what that changes about how spoofing and jamming get investigated." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
+  <link rel="stylesheet" href="styles/sections.css" />
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+
+  <nav class="site-nav" aria-label="Primary">
+    <div class="site-nav__inner">
+      <a class="site-nav__brand" href="index.html">
+        <span class="site-nav__brand-mark" aria-hidden="true"></span>
+        GHAST
+      </a>
+      <ul class="site-nav__links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="approach.html">Approach</a></li>
+        <li><a href="platform.html">Platform</a></li>
+        <li><a href="about.html" aria-current="page">About</a></li>
+      </ul>
+      <a class="site-nav__cta" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="page-hero__inner">
+      <p class="page-hero__eyebrow">About</p>
+      <h1 class="page-hero__title">Most tools ask "is this a known bad zone?" GHAST asks "does this vessel make physical sense?"</h1>
+    </div>
+  </header>
+
+  <main class="page-main">
+
+    <section class="section" data-reveal>
+      <div class="section__inner section__inner--narrow">
+        <p style="font-size: var(--step-lede); line-height: var(--lh-loose); color: var(--ink-700);">
+          A lot of maritime spoofing and jamming tools work the way an
+          antivirus scanner works: they keep a list — known jamming zones,
+          known bad actors, known patterns — and raise an alert when
+          something on the list shows up. That works right up until
+          something doesn't match the list. A new jamming source outside a
+          mapped zone, a spoofing technique nobody's cataloged yet, a
+          vessel behaving strangely for a reason no one's seen before —
+          none of that trips a signature check.
+        </p>
+        <p style="margin-top: var(--space-6); font-size: var(--step-lede); line-height: var(--lh-loose); color: var(--ink-700);">
+          GHAST starts from a different question. Given everything a vessel
+          has just told the world about itself — its speed, its course, how
+          fast it can physically turn — where should it be next? When the
+          position it actually reports drifts too far from that answer, the
+          list it's on stops mattering. The deviation is the evidence,
+          whether or not anyone has seen this particular flavor of spoofing
+          before.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" style="background: var(--paper-dim);" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">What we do differently</p>
+        <div class="data-cards">
+          <div class="card data-card">
+            <div class="data-card__index">01</div>
+            <div class="data-card__title">Behavior, not a blocklist</div>
+            <div class="data-card__body">A physics-bounded next-state prediction catches spoofing that doesn't match any known signature or mapped jamming zone — because it never needed to match one.</div>
+          </div>
+          <div class="card data-card">
+            <div class="data-card__index">02</div>
+            <div class="data-card__title">It tells you which kind of problem you have</div>
+            <div class="data-card__body">A single flagged vessel and a whole area flagging at once look the same as a raw alert. GHAST's fleet-wide check separates targeted spoofing from area jamming automatically, before an analyst opens the incident.</div>
+          </div>
+          <div class="card data-card">
+            <div class="data-card__index">03</div>
+            <div class="data-card__title">An evidence trail, not a black-box score</div>
+            <div class="data-card__body">Every tool the investigation agent calls and everything it finds is logged. The output is a hypothesis with attached evidence and a confidence number — never a bare "this is spoofing."</div>
+          </div>
+          <div class="card data-card">
+            <div class="data-card__index">04</div>
+            <div class="data-card__title">Confidence gates escalation, not alarm volume</div>
+            <div class="data-card__body">Low-confidence or novel patterns go to a human analyst with partial evidence instead of getting auto-declared. False-positive rate — the metric that actually erodes an insurer's trust — is treated as a first-class number from Stage 1 onward, not an afterthought.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" data-reveal>
+      <div class="section__inner section__inner--narrow">
+        <p class="eyebrow">Where this is now</p>
+        <h2 class="section__title">An academic project, built like a real one</h2>
+        <p class="section__lede">
+          GHAST is currently Stage 1 of a three-semester build at GTU-SET: a
+          live AIS ingestion pipeline, a Bi-LSTM trajectory model benchmarked
+          against published baselines and tracked in MLflow, and a
+          rule-assisted investigation agent with three working tools. The
+          site around it is honest about that — the diagrams and reports
+          you've seen are illustrative, not a live feed, and they'll stop
+          being illustrative in the order the
+          <a href="https://github.com/Vishmayraj/GHAST/blob/main/docs/HLD/HLD_and_Master_Implementation_Plan.md" target="_blank" rel="noopener" style="color:var(--ocean-600); text-decoration:underline;">implementation plan</a>
+          lays out.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <div>
+        <div class="site-footer__brand">GHAST</div>
+        <div class="site-footer__status">Stage 1 · Semester 5 · GTU-SET</div>
+      </div>
+      <div>
+        <a class="site-footer__link" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">Source on GitHub</a>
+      </div>
+    </div>
+    <p class="site-footer__meta">Illustrative platform preview — data on this site is mock, not live.</p>
+  </footer>
+
+</body>
+</html>

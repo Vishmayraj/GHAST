@@ -1,12 +1,20 @@
 /**
  * scroll-hero.js
  *
- * Drives the hero video's currentTime from ordinary page scroll
- * progress. The wheel/touch scroll itself is never intercepted —
- * we only read scroll position on the normal document and derive a
- * 0..1 progress value from how far the user has moved through the
- * tall .hero wrapper. position:sticky (see hero.css) does the
- * pinning; this script only owns "which video frame is showing".
+ * Two-phase scroll-scrubbed hero:
+ *
+ *   Phase A: scroll progress 0 -> PHASE_SPLIT maps to video time
+ *   0 -> the anomaly-flagged moment. No overlay.
+ *
+ *   Phase B: PHASE_SPLIT -> 1 continues scrubbing the video to its
+ *   end while each [data-hero-line] fades/slides up into place,
+ *   driven by the exact same scroll read — so it reads as one
+ *   continuous scroll, not a scene cut.
+ *
+ * The wheel/touch scroll itself is never intercepted: this only
+ * *reads* window scroll position (rAF-throttled) and writes derived
+ * values (video.currentTime, a --reveal custom property per line,
+ * scrim opacity) back as plain style updates.
  */
 
 (function () {
@@ -14,20 +22,24 @@
 
   var hero = document.querySelector("[data-hero]");
   var video = document.querySelector("[data-hero-video]");
-  var content = document.querySelector("[data-hero-content]");
+  var scrim = document.querySelector("[data-hero-scrim]");
+  var lines = Array.prototype.slice.call(document.querySelectorAll("[data-hero-line]"));
 
   if (!hero || !video) return;
+
+  // Fraction of the video's duration at which the anomaly is
+  // flagged on screen — the rest of the runtime is the reveal
+  // window. 5.5s into a 10s clip unless the source changes.
+  var PHASE_SPLIT = 0.55;
 
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   if (reduceMotion) {
-    // Respect the user's preference: play once, normally, no scrubbing.
     video.setAttribute("autoplay", "");
     video.loop = false;
     video.play().catch(function () {
-      /* autoplay can be blocked; poster frame remains, which is fine */
+      /* autoplay can be blocked; poster/first frame remains, which is fine */
     });
-    if (content) content.classList.add("is-active");
     return;
   }
 
@@ -39,15 +51,14 @@
   video.addEventListener("loadedmetadata", function () {
     duration = video.duration || 0;
     ready = duration > 0;
+    render();
   });
 
-  // Some browsers report duration slightly late even after
-  // loadedmetadata on compressed h264; readyState check is a
-  // cheap secondary confirmation.
   video.addEventListener("canplay", function () {
     if (!ready && video.duration) {
       duration = video.duration;
       ready = true;
+      render();
     }
   });
 
@@ -63,32 +74,32 @@
     return clamp(scrolled / scrollable, 0, 1);
   }
 
-  function updateContentVisibility(progress) {
-    if (!content) return;
-    // Text is on-screen for the first ~22% and fades back out by
-    // ~30%, staying clear of the frame for most of the anomaly
-    // sequence so the footage carries the story on its own.
-    var active = progress > 0.02 && progress < 0.3;
-    content.classList.toggle("is-active", active);
-  }
-
   function render() {
     ticking = false;
     var progress = getProgress();
-
     if (progress === lastProgress) return;
     lastProgress = progress;
 
-    updateContentVisibility(progress);
-
     if (ready) {
       var target = progress * duration;
-      // Avoid redundant seeks — some browsers drop frames when
-      // currentTime is written every single rAF tick.
       if (Math.abs(video.currentTime - target) > 0.03) {
         video.currentTime = target;
       }
     }
+
+    // q: 0 at the flag moment, 1 at video end. Clamped below 0 for
+    // all of phase A, so overlay stays fully hidden until then.
+    var q = clamp((progress - PHASE_SPLIT) / (1 - PHASE_SPLIT), 0, 1);
+
+    if (scrim) scrim.style.setProperty("--scrim", q > 0 ? Math.min(1, q * 1.6) : 0);
+
+    lines.forEach(function (line) {
+      var range = (line.getAttribute("data-hero-line") || "0,1").split(",");
+      var start = parseFloat(range[0]);
+      var end = parseFloat(range[1]);
+      var local = clamp((q - start) / (end - start), 0, 1);
+      line.style.setProperty("--reveal", local);
+    });
   }
 
   function onScroll() {
@@ -101,12 +112,14 @@
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", onScroll, { passive: true });
 
-  // Video needs at least one explicit play/pause cycle on some
-  // mobile browsers before currentTime seeks take effect.
+  // Some mobile browsers need an explicit play/pause cycle before
+  // currentTime seeks take effect.
   video.play().then(function () {
     video.pause();
     render();
   }).catch(function () {
     render();
   });
+
+  render();
 })();

@@ -1,18 +1,25 @@
 /*
- * Scroll-controlled cinematic hero.
+ * Scroll-controlled cinematic hero, in two phases over one
+ * continuous scroll-scrubbed video:
  *
- * Structure: a tall wrapper (.hero, height = N*100vh) gives the user
- * scroll distance to scrub through. Inside it, .hero__sticky pins to
- * the viewport (position: sticky) so the video stays visually fixed
- * while that distance is consumed. scroll-hero.js maps scroll
- * progress within the wrapper to the video's currentTime — the user
- * is scrolling their own page normally; nothing hijacks the wheel.
+ *   Phase A (video 0s -> ~5.5s): the cold open. No UI, no text —
+ *   just the vessel, its normal track, and the turn into the
+ *   anomaly. Nothing competes with the footage.
+ *
+ *   Phase B (video ~5.5s -> 10s, the moment the anomaly is flagged
+ *   through the vessel exiting frame): the video keeps scrubbing,
+ *   pinned in the background, while the title card scrolls up into
+ *   place over it — driven 1:1 by the same scroll position, so it
+ *   reads as continuous scrolling, not a cut to a new screen.
+ *
+ * scroll-hero.js writes --reveal (0..1) per line via inline style;
+ * this file only says what --reveal does to each line.
  */
 
 .hero {
   position: relative;
-  height: 420vh;
-  background: var(--ocean-950);
+  height: 460vh;
+  background: var(--c-navy);
 }
 
 .hero__sticky {
@@ -30,20 +37,22 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  background: var(--ocean-950);
+  background: var(--c-navy);
 }
 
-/* Soft lower scrim so overlay text stays legible against bright water */
+/* Only present during phase B, and only as much as legibility needs. */
 .hero__scrim {
   position: absolute;
   inset: 0;
   background: linear-gradient(
     to top,
-    rgba(4, 29, 38, 0.65) 0%,
-    rgba(4, 29, 38, 0.15) 38%,
-    rgba(4, 29, 38, 0) 62%
+    rgba(6, 27, 42, 0.78) 0%,
+    rgba(6, 27, 42, 0.25) 42%,
+    rgba(6, 27, 42, 0) 68%
   );
+  opacity: var(--scrim, 0);
   pointer-events: none;
+  transition: none;
 }
 
 .hero__content {
@@ -53,37 +62,48 @@
   padding: 0 var(--space-6) var(--space-16);
   max-width: var(--content-max);
   margin: 0 auto;
-  color: var(--color-text-on-ocean);
-  opacity: 0;
-  transform: translateY(10px);
-  transition: opacity var(--dur-med) var(--ease-out), transform var(--dur-med) var(--ease-out);
+  color: var(--color-text-on-navy);
 }
 
-.hero__content.is-active {
-  opacity: 1;
-  transform: none;
+.hero__line {
+  --reveal: 0;
+  opacity: var(--reveal);
+  transform: translateY(calc((1 - var(--reveal)) * 22px));
+  transition: none; /* scroll-driven — no easing lag against the wheel */
 }
 
-.hero__kicker {
+.hero__eyebrow {
   font-family: var(--font-mono);
   font-size: var(--step-ticker);
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--ocean-200);
-  margin: 0 0 var(--space-4);
+  color: var(--c-red);
+  margin: 0 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hero__eyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .hero__title {
+  font-family: var(--font-display);
   font-size: var(--step-h1);
-  max-width: 16ch;
-  color: var(--paper-0);
+  color: var(--paper);
+  line-height: 0.95;
 }
 
-.hero__sub {
-  margin-top: var(--space-4);
+.hero__tagline {
+  margin-top: var(--space-3);
   font-size: var(--step-lede);
-  color: var(--ocean-100);
-  max-width: 40ch;
+  color: var(--color-text-on-navy-muted);
+  max-width: 42ch;
 }
 
 .hero__scroll-cue {
@@ -92,23 +112,16 @@
   font-size: var(--step-ticker);
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--ocean-200);
-  opacity: 0.85;
-  animation: hero-cue-bob 2.2s var(--ease-out) infinite;
+  color: var(--color-text-on-navy-muted);
 }
 
-@keyframes hero-cue-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(6px); }
-}
-
-/* The final frame of the video matches the first: empty, even ocean.
-   This wash section continues that exact color as a flat field so
-   the cut from "video ends" to "page continues" reads as one
-   surface, not a scene change. */
+/* The video's final frame matches its first: empty, even ocean.
+   Continuing that exact color as a flat field below the hero makes
+   the cut from "video ends" to "page continues" read as one
+   surface. */
 .hero-wash {
-  background: linear-gradient(180deg, var(--ocean-500) 0%, var(--ocean-100) 100%);
-  height: 34vh;
+  background: linear-gradient(180deg, var(--c-ocean) 0%, var(--ocean-100) 100%);
+  height: 30vh;
   position: relative;
 }
 
@@ -119,17 +132,13 @@
     linear-gradient(var(--color-grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px);
   background-size: 64px 64px;
-  opacity: 0.4;
+  opacity: 0.5;
   mask-image: linear-gradient(180deg, transparent, black 70%);
 }
 
 @media (max-width: 720px) {
   .hero {
-    height: 340vh;
-  }
-
-  .hero__title {
-    max-width: 12ch;
+    height: 380vh;
   }
 }
 
@@ -144,9 +153,12 @@
     min-height: 480px;
   }
 
-  .hero__content {
+  .hero__scrim {
     opacity: 1;
-    transform: none;
+  }
+
+  .hero__line {
+    --reveal: 1;
   }
 
   .hero__scroll-cue {

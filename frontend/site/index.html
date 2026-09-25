@@ -4,19 +4,41 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>GHAST — GNSS &amp; AIS Hazardous Spoofing Tracker</title>
-  <meta name="description" content="GHAST detects GNSS/AIS spoofing and jamming from vessel trajectory behavior, then turns flagged anomalies into evidence-backed incident reports." />
+  <meta name="description" content="GHAST flags GNSS/AIS spoofing and jamming from vessel trajectory behavior, then turns it into an auditable, evidence-backed incident report." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
   <link rel="stylesheet" href="styles/hero.css" />
+  <link rel="stylesheet" href="styles/sections.css" />
 
   <script>document.documentElement.classList.remove("no-js");</script>
 </head>
 <body>
 
+  <nav class="site-nav" aria-label="Primary">
+    <div class="site-nav__inner">
+      <a class="site-nav__brand" href="index.html">
+        <span class="site-nav__brand-mark" aria-hidden="true"></span>
+        GHAST
+      </a>
+      <ul class="site-nav__links">
+        <li><a href="index.html" aria-current="page">Home</a></li>
+        <li><a href="approach.html">Approach</a></li>
+        <li><a href="platform.html">Platform</a></li>
+        <li><a href="about.html">About</a></li>
+      </ul>
+      <a class="site-nav__cta" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </nav>
+
   <!-- ============ HERO: scroll-controlled cinematic opening ============ -->
   <section class="hero" data-hero aria-label="GHAST introduction">
-    <div class="hero__sticky" data-hero-pin>
+    <div class="hero__sticky">
       <video
         class="hero__video"
         data-hero-video
@@ -28,12 +50,15 @@
         <source src="../assets/ghast-hero.webm" type="video/webm" />
         <source src="../assets/ghast-hero.mp4" type="video/mp4" />
       </video>
-      <div class="hero__scrim"></div>
-      <div class="hero__content" data-hero-content>
-        <p class="hero__kicker">GHAST — GNSS &amp; AIS Hazardous Spoofing Tracker</p>
-        <h1 class="hero__title">A vessel behaves normally. Then it doesn&rsquo;t.</h1>
-        <p class="hero__sub">Scroll to watch the anomaly unfold.</p>
-        <p class="hero__scroll-cue">scroll</p>
+      <div class="hero__scrim" data-hero-scrim></div>
+      <div class="hero__content">
+        <p class="hero__line hero__eyebrow" data-hero-line="0,0.4">Anomaly flagged</p>
+        <h1 class="hero__line hero__title" data-hero-line="0.15,0.65">GHAST</h1>
+        <p class="hero__line hero__tagline" data-hero-line="0.35,0.85">
+          GNSS &amp; AIS Hazardous Spoofing Tracker — behavior flagged, scored,
+          and turned into an evidence-backed incident report.
+        </p>
+        <p class="hero__line hero__scroll-cue" data-hero-line="0.55,1">keep scrolling</p>
       </div>
     </div>
   </section>
@@ -42,8 +67,73 @@
     <div class="hero-wash__grid"></div>
   </div>
 
-  <!-- Remaining sections are added in subsequent commits. -->
-  <main id="main"></main>
+  <main id="main">
+
+    <section class="section">
+      <div class="section__inner">
+        <p class="eyebrow">What just happened</p>
+        <h2 class="section__title">A trajectory, not a signature.</h2>
+        <p class="section__lede">
+          GHAST doesn't watch for a known jamming signature or a blocklist of
+          bad actors. It watches how a vessel moves — speed, course, heading,
+          rate of turn — and asks whether the next reported position is
+          physically plausible for that vessel. When the answer is no by a
+          wide enough margin, that's the signal.
+        </p>
+      </div>
+    </section>
+
+    <section class="section" style="padding-top: 0;">
+      <div class="section__inner" style="display:grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-6);">
+        <a class="card" style="padding: var(--space-6); text-decoration:none; color:inherit; display:block;" href="approach.html">
+          <p class="eyebrow">01</p>
+          <h3 style="font-size:1.125rem;">The approach</h3>
+          <p style="margin-top:var(--space-2); color:var(--color-text-muted); font-size:0.9375rem; line-height:var(--lh-loose);">
+            How next-state prediction turns a deviation into an anomaly
+            score, and how a fleet-wide check tells targeted spoofing apart
+            from area jamming.
+          </p>
+        </a>
+        <a class="card" style="padding: var(--space-6); text-decoration:none; color:inherit; display:block;" href="platform.html">
+          <p class="eyebrow">02</p>
+          <h3 style="font-size:1.125rem;">The platform</h3>
+          <p style="margin-top:var(--space-2); color:var(--color-text-muted); font-size:0.9375rem; line-height:var(--lh-loose);">
+            What a flagged anomaly becomes: a bounded investigation agent,
+            an auditable trace, and an incident report an analyst can
+            actually act on.
+          </p>
+        </a>
+        <a class="card" style="padding: var(--space-6); text-decoration:none; color:inherit; display:block;" href="about.html">
+          <p class="eyebrow">03</p>
+          <h3 style="font-size:1.125rem;">About GHAST</h3>
+          <p style="margin-top:var(--space-2); color:var(--color-text-muted); font-size:0.9375rem; line-height:var(--lh-loose);">
+            Why behavior-based detection, and what we do differently from
+            zone-alert and signature-matching tools already out there.
+          </p>
+        </a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <div>
+        <div class="site-footer__brand">GHAST</div>
+        <div class="site-footer__status">Stage 1 · Semester 5 · GTU-SET</div>
+        <div class="site-footer__stack" style="margin-top: var(--space-6);">
+          <span class="stack-chip">PyTorch</span>
+          <span class="stack-chip">TimescaleDB</span>
+          <span class="stack-chip">FastAPI</span>
+          <span class="stack-chip">LangGraph</span>
+        </div>
+      </div>
+      <div>
+        <a class="site-footer__link" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">Source on GitHub</a>
+      </div>
+    </div>
+    <p class="site-footer__meta">Illustrative platform preview — data on this site is mock, not live.</p>
+  </footer>
 
   <script src="scripts/scroll-hero.js"></script>
 </body>

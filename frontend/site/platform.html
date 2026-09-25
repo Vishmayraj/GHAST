@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Platform — GHAST</title>
+  <meta name="description" content="From a flagged anomaly to an evidence-backed incident report: GHAST's investigation agent and analyst dashboard preview." />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
+  <link rel="stylesheet" href="styles/sections.css" />
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+
+  <nav class="site-nav" aria-label="Primary">
+    <div class="site-nav__inner">
+      <a class="site-nav__brand" href="index.html">
+        <span class="site-nav__brand-mark" aria-hidden="true"></span>
+        GHAST
+      </a>
+      <ul class="site-nav__links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="approach.html">Approach</a></li>
+        <li><a href="platform.html" aria-current="page">Platform</a></li>
+        <li><a href="about.html">About</a></li>
+      </ul>
+      <a class="site-nav__cta" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+  </nav>
+
+  <header class="page-hero">
+    <div class="page-hero__inner">
+      <p class="page-hero__eyebrow">From anomaly to incident</p>
+      <h1 class="page-hero__title">What happens after the flag.</h1>
+      <p class="page-hero__lede">
+        A flagged anomaly doesn't reach an analyst as a bare number. A
+        bounded, tool-using agent gathers evidence, forms a hypothesis, and
+        either drafts a structured report or escalates — and every step it
+        takes is logged.
+      </p>
+    </div>
+  </header>
+
+  <main class="page-main">
+
+    <section class="section" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">The investigation agent</p>
+        <h2 class="section__title">Bounded, evidence-gathering, auditable</h2>
+        <p class="section__lede">
+          The agent never declares "this is spoofing." It pulls trajectory
+          history, checks known jamming zones, checks incident history, and
+          scores its own confidence in a hypothesis — jamming, targeted
+          spoof, equipment fault, or benign. Escalation is driven by that
+          confidence, not by raw anomaly magnitude, which is the specific
+          answer to the false-positive risk an insurer buyer will actually
+          judge this on.
+        </p>
+
+        <div class="agent-layout">
+          <ol class="agent-trace" id="agent-trace-mount"></ol>
+          <div class="card incident-card" id="incident-card-mount"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" style="background: var(--paper-dim);" data-reveal>
+      <div class="section__inner">
+        <p class="eyebrow">The delivery layer</p>
+        <h2 class="section__title">What the analyst actually sees</h2>
+        <p class="section__lede">
+          The backend isn't built yet — this preview shows the shape the
+          dashboard is built toward: an incident feed and a per-vessel
+          drill-down, wired to sit directly on top of the scoring API once
+          it exists.
+        </p>
+
+        <div class="card dashboard-preview">
+          <div class="dashboard-preview__chrome">
+            <span class="dashboard-preview__dot"></span>
+            <span class="dashboard-preview__dot"></span>
+            <span class="dashboard-preview__dot"></span>
+            <span class="dashboard-preview__label">analyst-dashboard — incident feed (preview)</span>
+          </div>
+          <div class="dashboard-preview__body">
+            <div class="dashboard-preview__feed" id="dashboard-feed-mount"></div>
+            <div class="dashboard-preview__detail">
+              <h4>MV KESTREL BAY — deviation from predicted position</h4>
+              <div class="dashboard-preview__chart" id="dashboard-chart-mount"></div>
+              <div class="dashboard-preview__chart-label">
+                <span>t&minus;6h</span>
+                <span>now</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="dashboard-preview__flag">Mock data — illustrative preview, not a live feed.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <div>
+        <div class="site-footer__brand">GHAST</div>
+        <div class="site-footer__status">Stage 1 · Semester 5 · GTU-SET</div>
+      </div>
+      <div>
+        <a class="site-footer__link" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">Source on GitHub</a>
+      </div>
+    </div>
+    <p class="site-footer__meta">Illustrative platform preview — data on this site is mock, not live.</p>
+  </footer>
+
+  <script src="scripts/mock-data.js"></script>
+  <script src="scripts/charts.js"></script>
+  <script src="scripts/sections.js"></script>
+  <script src="scripts/reveal.js"></script>
+</body>
+</html>
