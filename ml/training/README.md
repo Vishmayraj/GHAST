@@ -60,6 +60,48 @@ example `--start 2026-04-01T00:00:00+00:00 --end 2026-04-16T00:00:00+00:00`.
 It never silently mixes into live mode. Preserve the resolved data window,
 commit SHA, and output with the experiment record for comparison.
 
+## 3a. How training scales to the full historical backfill
+
+`--source historical` over the full MarineCadastre range is ~31M rows, too
+much to load with a single `connection.fetch()` or to fit as one giant
+training batch. The pipeline instead:
+
+1. Streams rows from TimescaleDB through a server-side cursor
+   (`features.pipeline.stream_feature_windows`), grouped by vessel as they
+   arrive, so it never holds more than one vessel's reports plus a bounded
+   prefetch buffer in memory.
+2. Writes windows straight to small `.npz` shards on disk
+   (`training.dataset_cache.materialize_to_shards`), splitting vessels into
+   train/validation by a stable hash of MMSI, so the split needs no
+   up-front vessel list and never leaks a vessel across both sides.
+3. Trains over those shards in mini-batches (`--batch-size`, default 256),
+   loading one shard at a time and moving only the current batch onto the
+   GPU if one is available.
+4. Saves a checkpoint after every epoch under `--checkpoint-dir` (default
+   `checkpoints/`), plus a rolling `latest.pt`.
+
+Useful flags for a laptop-scale run:
+
+```powershell
+python -m training.train --dsn $env:POSTGRES_DSN --source historical `
+    --start 2026-04-01T00:00:00+00:00 --end 2026-04-16T00:00:00+00:00 --epochs 10 `
+    --batch-size 256 --max-vessels 500 --checkpoint-dir checkpoints\dev-run
+```
+
+- `--max-vessels` / `--max-windows` / `--max-rows` are explicit development
+  sampling caps; leave them unset for a real training run so nothing is
+  silently truncated.
+- `--device cpu` or `--device cuda` overrides auto-detection.
+- `--cache-dir` points at a specific shard cache directory instead of a
+  fresh temp directory; useful for inspecting what got materialized.
+- `--resume-from checkpoints\dev-run\latest.pt` continues from a checkpoint.
+- If the machine still struggles, lower `--batch-size` first; that is the
+  main memory/VRAM knob.
+
+Progress prints throughout: an estimated row count up front (best-effort,
+skipped if the count itself times out), running row/vessel/window counts
+while streaming, and a running loss every 20 batches during training.
+
 ## 4. Run the fixture-only tests
 
 These tests do not connect to Docker, TimescaleDB, MLflow, or an API. From
@@ -67,6 +109,7 @@ These tests do not connect to Docker, TimescaleDB, MLflow, or an API. From
 
 ```powershell
 python -m pytest features\tests -v
+python -m pytest training\tests -v
 python -m pytest models\bilstm\tests -v
 python -m pytest evaluation\tests -v
 ```
