@@ -1,0 +1,19 @@
+name: agent-tests
+on:
+  push:
+    branches: [main]
+    paths: ["agent/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
+  pull_request:
+    paths: ["agent/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
+defaults:
+  run:
+    working-directory: agent
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install pytest pytest-asyncio
+      - run: pytest tests -v
