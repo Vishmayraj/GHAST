@@ -15,6 +15,11 @@ Edit `.env` and set `AISSTREAM_API_KEY` (a free key from https://aisstream.io) -
 docker compose up -d
 ```
 
+The first run builds MinIO from source (a few minutes, see
+`infra/docker/minio/Dockerfile` for why) - it's not pulled as a
+pre-built image, since minio/minio is no longer available on Docker
+Hub or quay.io. After the first build it's cached like any image.
+
 This brings up:
 - **TimescaleDB** (Postgres + PostGIS + TimescaleDB) on `localhost:5432` - where vessel tracks and incidents live.
 - **MinIO** (S3-compatible object storage) on `localhost:9000` (API) / `localhost:9001` (console) - where the raw AIS archive lives.

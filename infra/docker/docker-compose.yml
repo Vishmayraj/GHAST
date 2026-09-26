@@ -23,8 +23,15 @@ services:
     volumes:
       - timescaledb_data:/home/postgres/pgdata/data
 
+  # Built from source (infra/docker/Dockerfile) rather than
+  # pulled - minio/minio is no longer available on Docker Hub or
+  # quay.io as of Sep 2026. See that Dockerfile's header comment for
+  # the full story. First build takes a few minutes (compiles from
+  # source); after that it's cached like any other image.
   minio:
-    image: minio/minio:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: ghast-minio
     restart: unless-stopped
     command: server /data --console-address ":9001"
@@ -51,11 +58,22 @@ services:
       AISSTREAM_BOUNDING_BOXES: ${AISSTREAM_BOUNDING_BOXES:-}
       AISSTREAM_FILTER_MMSI: ${AISSTREAM_FILTER_MMSI:-}
       AISSTREAM_FILTER_MESSAGE_TYPES: ${AISSTREAM_FILTER_MESSAGE_TYPES:-}
-      POSTGRES_DSN: postgresql://${POSTGRES_USER:-ghast}:${POSTGRES_PASSWORD:-ghast}@timescaledb:5432/${POSTGRES_DB:-ghast}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB:-ghast}
       MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ghast}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ghast12345}
       MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-ghast-raw-ais}
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: frontend/Dockerfile
+    container_name: ghast-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - ingestion
 
 volumes:
   timescaledb_data:
