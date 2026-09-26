@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "ml/evaluation/**"
+      - "ml/features/**"
       - ".github/workflows/ml-evaluation-tests.yml"
   pull_request:
     paths:
       - "ml/evaluation/**"
+      - "ml/features/**"
       - ".github/workflows/ml-evaluation-tests.yml"
 
 defaults:
