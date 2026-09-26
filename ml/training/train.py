@@ -4,15 +4,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import torch
 from torch import nn
 
 from features.extract import N_FEATURES, VESSEL_CLASS_INDEX
-from features.pipeline import FeatureWindow, load_training_windows
+from features.pipeline import FeatureWindow, TrainingDataSource, load_live_coverage, load_training_windows
 from models.bilstm.model import BiLSTMNextDelta
+from training.window_policy import initial_live_window, rolling_live_window
 
 DEFAULT_LEARNING_RATE = 1e-3
 DEFAULT_EPOCHS = 10
@@ -51,17 +52,42 @@ def train_model(windows: Sequence[FeatureWindow], epochs: int = DEFAULT_EPOCHS, 
     return model, losses
 
 
-async def run_training(dsn: str, start: datetime, end: datetime, epochs: int) -> tuple[BiLSTMNextDelta, list[float]]:
-    """Boundary that loads live clean windows; synthetic injection never enters training."""
-    return train_model(await load_training_windows(dsn, start, end), epochs=epochs)
+async def run_training(
+    dsn: str, start: datetime, end: datetime, epochs: int, source: TrainingDataSource = "live",
+) -> tuple[BiLSTMNextDelta, list[float]]:
+    """Load only the caller's explicit source; synthetic data never enters training."""
+    return train_model(await load_training_windows(dsn, start, end, source), epochs=epochs)
+
+
+async def select_live_window(dsn: str, mode: str) -> tuple[datetime, datetime]:
+    """Anchor initial training to first live data, then use rolling live coverage."""
+    coverage = await load_live_coverage(dsn)
+    decision = (
+        initial_live_window(coverage.first_report, coverage.latest_report, datetime.now(timezone.utc))
+        if mode == "initial" else rolling_live_window(coverage.first_report, coverage.latest_report)
+    )
+    if not decision.ready:
+        raise ValueError(decision.reason)
+    assert decision.start is not None and decision.end is not None
+    return decision.start, decision.end
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dsn", required=True); parser.add_argument("--start", required=True); parser.add_argument("--end", required=True)
+    parser.add_argument("--dsn", required=True)
+    parser.add_argument("--source", choices=("live", "historical"), default="live")
+    parser.add_argument("--live-window", choices=("initial", "rolling"), default="initial")
+    parser.add_argument("--start", help="Required only for explicit historical training.")
+    parser.add_argument("--end", help="Required only for explicit historical training.")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     args = parser.parse_args()
-    model, losses = asyncio.run(run_training(args.dsn, datetime.fromisoformat(args.start), datetime.fromisoformat(args.end), args.epochs))
+    if args.source == "live":
+        start, end = asyncio.run(select_live_window(args.dsn, args.live_window))
+    elif args.start and args.end:
+        start, end = datetime.fromisoformat(args.start), datetime.fromisoformat(args.end)
+    else:
+        parser.error("--start and --end are required when --source historical")
+    model, losses = asyncio.run(run_training(args.dsn, start, end, args.epochs, args.source))
     print(f"trained {type(model).__name__}; final loss={losses[-1]:.6f}")
     return 0
 
