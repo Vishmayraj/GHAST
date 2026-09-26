@@ -1,4 +1,5 @@
--- Stage 1 core tables: vessel positions (hypertable) + latest static data.
+-- Stage 1 core tables: vessel positions (hypertable), latest static data,
+-- investigation incidents, and known jamming/spoofing zones.
 -- Requires the TimescaleDB and PostGIS extensions - both are bundled in
 -- the timescale/timescaledb-ha image used by infra/docker/docker-compose.yml.
 --
@@ -50,3 +51,71 @@ CREATE TABLE IF NOT EXISTS vessel_static (
     max_draught  DOUBLE PRECISION,
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- One row per flagged anomaly the investigation agent (agent/) has looked
+-- at, from first flag through hypothesis to either a drafted report or a
+-- human escalation. This is what agent/orchestrator/ writes to as it runs,
+-- what agent/tools/incident_history.py reads from ("check for similar past
+-- incidents", MIP section 4.1), and what backend/api/ serves to the
+-- dashboard's incident list and per-vessel drill-down (Sem5IP.md section 2).
+--
+-- evidence and tool_call_log are JSONB rather than normalized tables
+-- deliberately: each tool (track_history, jamming_zones, incident_history)
+-- returns a different shape, and MIP section 4.2's auditability
+-- requirement ("every agent action logged") only needs the log readable
+-- and replayable, not queryable by sub-field at Stage 1.
+CREATE TABLE IF NOT EXISTS incidents (
+    id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mmsi              BIGINT NOT NULL,
+    flagged_at        TIMESTAMPTZ NOT NULL,
+    window_start      TIMESTAMPTZ,
+    window_end        TIMESTAMPTZ,
+    flagged_position  GEOGRAPHY(POINT, 4326),
+    anomaly_score     DOUBLE PRECISION NOT NULL,
+    anomaly_type      TEXT,
+    hypothesis        TEXT NOT NULL DEFAULT 'unresolved'
+                          CHECK (hypothesis IN (
+                              'jamming', 'targeted_spoof',
+                              'equipment_fault', 'benign', 'unresolved'
+                          )),
+    confidence        DOUBLE PRECISION,
+    status            TEXT NOT NULL DEFAULT 'escalated'
+                          CHECK (status IN ('reported', 'escalated', 'resolved')),
+    evidence          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    tool_call_log     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    report_text       TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS incidents_mmsi_flagged_idx
+    ON incidents (mmsi, flagged_at DESC);
+CREATE INDEX IF NOT EXISTS incidents_status_idx
+    ON incidents (status);
+CREATE INDEX IF NOT EXISTS incidents_position_idx
+    ON incidents USING GIST (flagged_position);
+
+-- Known jamming/spoofing zones. Stage 1: manually curated
+-- (data/jamming_zones/), queried by agent/tools/jamming_zones.py to check
+-- a flagged position/time against a known zone (MIP section 4.1). Stage 2
+-- adds automated ingestion from public advisories (MIP section 8.3) into
+-- this same table - `source` distinguishes the two without a schema change.
+CREATE TABLE IF NOT EXISTS jamming_zones (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT,
+    zone        GEOGRAPHY(MULTIPOLYGON, 4326) NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'manual'
+                    CHECK (source IN ('manual', 'automated')),
+    confidence  DOUBLE PRECISION,
+    active      BOOLEAN NOT NULL DEFAULT TRUE,
+    first_seen  TIMESTAMPTZ,
+    last_seen   TIMESTAMPTZ,
+    notes       TEXT,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS jamming_zones_geo_idx
+    ON jamming_zones USING GIST (zone);
+CREATE INDEX IF NOT EXISTS jamming_zones_active_idx
+    ON jamming_zones (active);
