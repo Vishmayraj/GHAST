@@ -39,7 +39,9 @@ RUN CGO_ENABLED=0 go build -tags kqueue -trimpath -o /out/minio .
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates && \
-    adduser -D -H -u 1000 minio
+    adduser -D -H -u 1000 minio && \
+    mkdir -p /data && \
+    chown -R minio:minio /data
 
 COPY --from=build /out/minio /usr/bin/minio
 
