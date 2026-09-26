@@ -8,6 +8,13 @@ explainer page would be complexity without a corresponding need.
 problem — real-time map state, incident filtering, drill-down — and
 is where the HLD's React + MapLibre/Deck.gl choice actually applies.)
 
+`assets/` lives inside `site/`, not as a `frontend/`-level sibling,
+specifically so `site/` is a self-contained tree: anything that
+serves this directory — `frontend/Dockerfile`'s
+`COPY frontend/site/ /usr/share/nginx/html/`, a static host, a CDN —
+gets the video for free, with no separate copy step to remember and
+no `../` path escaping the served root.
+
 ## Structure
 
 ```
@@ -16,6 +23,8 @@ site/
   about.html             # differentiation / "what we do differently"
   approach.html           # detection methodology + fleet differentiation
   platform.html             # investigation agent + dashboard preview
+  assets/
+    ghast-hero.mp4 / .webm  # the cinematic hero video
   styles/
     tokens.css           # 5-color palette (ocean/navy/red/white/black),
                           # Sora + Space Grotesk type scale
