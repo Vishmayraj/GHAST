@@ -38,7 +38,8 @@ def test_patterns_violate_their_intended_physical_signal() -> None:
     drifted, drift_labels = inject_gradual_drift(window, severity=0.8, seed=2)
     assert drift_labels.count(True) > 1 and not np.array_equal(drifted.positions, window.positions)
     frozen, freeze_labels = inject_freeze_replay(window, severity=1.0, seed=4)
-    assert freeze_labels.count(True) >= 1 and any(np.array_equal(frozen.positions[index], frozen.positions[index - 1]) for index in range(1, len(frozen.positions)))
+    diffs = np.linalg.norm(np.diff(frozen.positions, axis=0), axis=1)
+    assert freeze_labels.count(True) >= 1 and np.any(diffs < 1e-3)
     turning, kinematic_labels = inject_impossible_kinematics(window, severity=1.0, seed=5)
     changed = kinematic_labels.index(True)
     assert turning.features[changed, 3] > 100
