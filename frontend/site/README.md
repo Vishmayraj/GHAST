@@ -40,6 +40,30 @@ site/
     sections.js               # renders mock data into the DOM (approach/platform)
 ```
 
+## The hero video's encoding matters
+
+`assets/ghast-hero.{mp4,webm}` is re-encoded with a keyframe every 4
+frames (`-g 4 -keyint_min 4`), not whatever a default encode gives
+you. `video.currentTime` seeks have to decode forward from the
+nearest keyframe, so a long GOP (the original render had exactly 2
+keyframes across the whole 10s clip) makes every scroll-driven seek
+decode up to seconds of frames — the scrubbing lags behind the
+scroll and only catches up once you stop. If this video ever gets
+regenerated, re-encode it the same way before dropping it in:
+
+```
+ffmpeg -i <source> -an -c:v libx264 -preset slow -crf 22 \
+  -g 4 -keyint_min 4 -sc_threshold 0 -pix_fmt yuv420p \
+  -movflags +faststart ghast-hero.mp4
+
+ffmpeg -i <source> -an -c:v libvpx-vp9 -crf 30 -b:v 0 \
+  -g 4 -keyint_min 4 -pix_fmt yuv420p -row-mt 1 \
+  ghast-hero.webm
+```
+
+(`-an` drops audio — the element is always muted, so it's dead
+weight.)
+
 ## The hero — two phases over one scroll-scrubbed video
 
 `.hero` is a tall wrapper (several viewport heights); `.hero__sticky`
