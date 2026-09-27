@@ -14,3 +14,5 @@ infra/docker/.env
 
 # ML
 *.pt
+ml/mlruns/
+mlruns/

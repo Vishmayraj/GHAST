@@ -6,11 +6,15 @@ on:
     paths:
       - "ml/evaluation/**"
       - "ml/features/**"
+      - "ml/models/bilstm/**"
+      - "ml/requirements*.txt"
       - ".github/workflows/ml-evaluation-tests.yml"
   pull_request:
     paths:
       - "ml/evaluation/**"
       - "ml/features/**"
+      - "ml/models/bilstm/**"
+      - "ml/requirements*.txt"
       - ".github/workflows/ml-evaluation-tests.yml"
 
 defaults:
@@ -25,5 +29,5 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install pytest
+      - run: pip install -r requirements-dev.txt
       - run: pytest evaluation/tests -v
