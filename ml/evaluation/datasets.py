@@ -35,6 +35,13 @@ class AISObservation:
     acceleration: float | None = None
     delta_heading: float | None = None
     prediction_error: float | None = None
+    # Which synthetic injector produced this row (see features.inject.SPOOF_PATTERNS),
+    # or None for an unmodified control row. Only ever populated for
+    # injected_synthetic-sourced observations; every other loader leaves this at
+    # its default. Kept on the shared dataclass rather than a parallel structure
+    # so later per-pattern reporting (score_checkpoint.py, and whatever consumes
+    # its output next) doesn't need to re-derive it from the window shape.
+    pattern: str | None = None
     source: str = "unknown"
 
 
