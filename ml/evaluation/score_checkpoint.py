@@ -45,15 +45,19 @@ from evaluation.datasets import AISObservation
 from evaluation.harness import EvaluationResult, evaluate
 from features.extract import COG_INDEX, HEADING_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
 from features.inject import InjectedWindow, build_synthetic_dataset
-from features.pipeline import stream_feature_windows
-from models.bilstm.infer import prediction_errors
+from features.pipeline import TrainingDataSource, stream_feature_windows
+from models.bilstm.infer import prediction_errors_batch
 from models.bilstm.model import BiLSTMNextDelta
+from training.dataset_cache import is_validation_vessel
 
 DEFAULT_SEED = 0
-DEFAULT_MLFLOW_TRACKING_URI = "file:mlruns"
+DEFAULT_MLFLOW_TRACKING_URI = "sqlite:///mlruns/mlflow.db"
 DEFAULT_EXPERIMENT_NAME = "bilstm-checkpoint-scoring"
 CONTROL_LABEL = "control"  # display name for InjectedWindow.pattern is None
 THRESHOLD_SWEEP_POINTS = 25
+DEFAULT_EVAL_BATCH_SIZE = 1024
+PROFILE_EVERY_BATCHES = 10
+HOLDOUT_METHOD = "validation_vessel_split (fraction=0.2)"
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[BiLSTMNextDelta, dict]:
@@ -88,9 +92,7 @@ def _implied_acceleration(features: np.ndarray) -> list[float | None]:
     return accelerations
 
 
-def score_injected_windows(
-    model: BiLSTMNextDelta, injected_windows: list[InjectedWindow]
-) -> list[AISObservation]:
+def score_injected_windows(model: BiLSTMNextDelta, injected_windows: list[InjectedWindow]) -> list[AISObservation]:
     """Flatten scored windows into AISObservation rows.
 
     Mirrors datasets.py::load_injected_synthetic's flattening shape, but sets
@@ -99,9 +101,9 @@ def score_injected_windows(
     results out by spoof pattern without re-deriving it from window structure.
     """
     observations: list[AISObservation] = []
-    for injected in injected_windows:
+    errors_per_window = prediction_errors_batch(model, [injected.window for injected in injected_windows])
+    for injected, errors in zip(injected_windows, errors_per_window, strict=True):
         window = injected.window
-        errors = prediction_errors(model, window)
         accelerations = _implied_acceleration(window.features)
         for index, is_spoofed in enumerate(injected.is_spoofed):
             row_features = window.features[index]
@@ -194,21 +196,33 @@ def _log_mlflow(
     chosen: EvaluationResult,
     baseline_best: EvaluationResult,
     breakdown: dict[str, EvaluationResult],
+    source: TrainingDataSource,
+    holdout_windows: int,
 ) -> None:
     """One MLflow run per scoring pass: checkpoint identity, eval range, the full
     sweep per detector, the chosen threshold, and the per-pattern breakdown.
     """
     import mlflow
 
-    mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_MLFLOW_TRACKING_URI))
+    tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_MLFLOW_TRACKING_URI)
+    if tracking_uri == DEFAULT_MLFLOW_TRACKING_URI:
+        # SQLAlchemy will create the database file but not its parent directory.
+        Path("mlruns").mkdir(exist_ok=True)
+    mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(DEFAULT_EXPERIMENT_NAME)
     with mlflow.start_run():
         mlflow.log_param("checkpoint_path", str(checkpoint_path))
         mlflow.log_param("checkpoint_epoch", checkpoint.get("epoch"))
         mlflow.log_param("checkpoint_train_loss", checkpoint.get("train_loss"))
         mlflow.log_param("checkpoint_val_loss", checkpoint.get("val_loss"))
+        mlflow.log_param("checkpoint_training_source", checkpoint.get("source", "unknown (checkpoint predates provenance fields)"))
+        mlflow.log_param("checkpoint_training_start", checkpoint.get("start", "unknown (checkpoint predates provenance fields)"))
+        mlflow.log_param("checkpoint_training_end", checkpoint.get("end", "unknown (checkpoint predates provenance fields)"))
         mlflow.log_param("eval_start", eval_start.isoformat())
         mlflow.log_param("eval_end", eval_end.isoformat())
+        mlflow.log_param("eval_source", source)
+        mlflow.log_param("holdout_method", HOLDOUT_METHOD)
+        mlflow.log_param("holdout_windows", holdout_windows)
         mlflow.log_param("seed", seed)
 
         mlflow.log_metric("chosen_threshold", chosen.threshold)
@@ -252,36 +266,65 @@ async def run(
     seed: int,
     device_name: str | None,
     skip_mlflow: bool,
+    source: TrainingDataSource = "live",
+    batch_size: int = DEFAULT_EVAL_BATCH_SIZE,
 ) -> int:
     device = torch.device(device_name) if device_name else torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model, checkpoint = load_checkpoint(checkpoint_path, device)
-    print(
-        f"scoring checkpoint={checkpoint_path} epoch={checkpoint.get('epoch')} "
-        f"train_loss={checkpoint.get('train_loss')} val_loss={checkpoint.get('val_loss')}"
-    )
-    print(f"eval range: {eval_start.isoformat()}..{eval_end.isoformat()} (seed={seed}, device={device})")
+    provenance_fallback = "unknown (checkpoint predates provenance fields)"
+    print(f"scoring checkpoint={checkpoint_path} epoch={checkpoint.get('epoch')} train_loss={checkpoint.get('train_loss')} val_loss={checkpoint.get('val_loss')}")
+    print(f"checkpoint training provenance: source={checkpoint.get('source', provenance_fallback)} start={checkpoint.get('start', provenance_fallback)} end={checkpoint.get('end', provenance_fallback)}")
+    print(f"eval range: {eval_start.isoformat()}..{eval_end.isoformat()} (seed={seed}, device={device}, source={source})")
+    print(f"holdout_method = {HOLDOUT_METHOD}; eval_batch_size={batch_size}")
 
-    windows = [
-        window
-        async for window in stream_feature_windows(
-            dsn,
-            eval_start,
-            eval_end,
-            source="historical",
-            max_windows=1000,
-            progress_every=50_000,
-            on_progress=lambda rows, vessels, windows: print(
-                f"loading: {rows:,} rows | {vessels:,} vessels | {windows:,} windows",
-                flush=True,
-            ),
-        )
-    ]
-    if not windows:
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    import psutil
+    process = psutil.Process()
+    observations: list[AISObservation] = []
+    batch: list = []
+    holdout_windows = 0
+    batches_scored = 0
+
+    def _profile() -> str:
+        rss_mib = process.memory_info().rss / 1024 ** 2
+        if device.type != "cuda":
+            return f"rss={rss_mib:.1f} MiB gpu=not-in-use"
+        allocated_mib = torch.cuda.memory_allocated(device) / 1024 ** 2
+        try:
+            utilization = torch.cuda.utilization(device)
+            gpu_note = f"gpu_utilization={utilization}%"
+        except (AttributeError, RuntimeError):
+            gpu_note = "gpu_utilization=unavailable"
+        return f"rss={rss_mib:.1f} MiB cuda_allocated={allocated_mib:.1f} MiB {gpu_note}"
+
+    def _score_batch() -> None:
+        nonlocal batches_scored
+        if not batch:
+            return
+        injected = build_synthetic_dataset(batch, seed=seed + batches_scored)
+        observations.extend(score_injected_windows(model, injected))
+        batches_scored += 1
+        if batches_scored == 1 or batches_scored % PROFILE_EVERY_BATCHES == 0:
+            print(f"scored batch={batches_scored:,} holdout_windows={holdout_windows:,} observations={len(observations):,} {_profile()}", flush=True)
+        batch.clear()
+
+    async for window in stream_feature_windows(
+        dsn, eval_start, eval_end, source=source, progress_every=50_000,
+        on_progress=lambda rows, vessels, windows: print(f"loading: {rows:,} rows | {vessels:,} vessels | {windows:,} windows", flush=True),
+    ):
+        if not is_validation_vessel(window.mmsi):
+            continue
+        batch.append(window)
+        holdout_windows += 1
+        if len(batch) >= batch_size:
+            _score_batch()
+    _score_batch()
+
+    if not observations:
         print(f"no clean windows found for {eval_start.isoformat()}..{eval_end.isoformat()}", file=sys.stderr)
         return 1
-    injected_windows = build_synthetic_dataset(windows, seed=seed)
-    observations = score_injected_windows(model, injected_windows)
-    print(f"scored {len(observations)} observations across {len(injected_windows)} windows")
+    print(f"scored {len(observations):,} observations across {holdout_windows:,} held-out windows in {batches_scored:,} bounded batches; {_profile()}")
 
     sweeps = {
         "prediction_error": sweep_thresholds(
@@ -319,7 +362,7 @@ async def run(
         )
 
     if not skip_mlflow:
-        _log_mlflow(checkpoint_path, checkpoint, eval_start, eval_end, seed, sweeps, chosen, baseline_best, breakdown)
+        _log_mlflow(checkpoint_path, checkpoint, eval_start, eval_end, seed, sweeps, chosen, baseline_best, breakdown, source, holdout_windows)
 
     print(
         f"\nIf this is the run you want to ship, update OPERATING_THRESHOLD in "
@@ -332,9 +375,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--checkpoint", required=True, help="Path to a .pt checkpoint, e.g. checkpoints/epoch_010.pt")
+    # Matches ml/training/train.py::main()'s convention for the same choice, including
+    # the "live" default - callers scoring against the historical backfill must pass
+    # --source historical explicitly, the same way training does.
+    parser.add_argument("--source", choices=("live", "historical"), default="live")
     parser.add_argument("--eval-start", required=True, help="ISO date/datetime, start of the eval range")
     parser.add_argument("--eval-end", required=True, help="ISO date/datetime, end of the eval range")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_EVAL_BATCH_SIZE, help="Held-out windows per bounded injection/model batch.")
     parser.add_argument("--device", choices=("cpu", "cuda"), help="Defaults to cuda if available, else cpu.")
     parser.add_argument("--no-mlflow", action="store_true", help="Skip MLflow logging (useful for quick local checks).")
     args = parser.parse_args(argv)
@@ -347,6 +395,8 @@ def main(argv: list[str] | None = None) -> int:
         args.seed,
         args.device,
         args.no_mlflow,
+        args.source,
+        args.batch_size,
     ))
 
 

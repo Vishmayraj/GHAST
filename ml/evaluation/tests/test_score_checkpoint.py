@@ -21,6 +21,7 @@ from features.extract import N_FEATURES
 from features.inject import SPOOF_PATTERNS, build_synthetic_dataset
 from features.pipeline import FeatureWindow
 from models.bilstm.model import BiLSTMNextDelta
+from models.bilstm.infer import prediction_errors, prediction_errors_batch
 
 WINDOW_LENGTH = 20
 
@@ -56,6 +57,15 @@ def test_score_injected_windows_populates_prediction_error(tiny_model, injected_
     observations = score_injected_windows(tiny_model, injected_windows)
     assert len(observations) == sum(len(w.is_spoofed) for w in injected_windows)
     assert all(o.prediction_error is not None for o in observations)
+
+
+def test_batched_prediction_errors_match_single_window_scoring(tiny_model, injected_windows):
+    windows = [injected.window for injected in injected_windows]
+    batched = prediction_errors_batch(tiny_model, windows)
+    single = [prediction_errors(tiny_model, window) for window in windows]
+    assert len(batched) == len(single)
+    for batch_errors, single_errors in zip(batched, single, strict=True):
+        np.testing.assert_allclose(batch_errors, single_errors)
 
 
 def test_score_injected_windows_first_report_per_window_has_zero_error(tiny_model, injected_windows):

@@ -108,6 +108,7 @@ def _run_epoch(
 def train_from_shards(
     manifest: CacheManifest, epochs: int, learning_rate: float, batch_size: int,
     device: torch.device, checkpoint_dir: Path, resume_from: Path | None = None,
+    *, source: TrainingDataSource | None = None, start: datetime | None = None, end: datetime | None = None,
 ) -> tuple[BiLSTMNextDelta, list[float]]:
     """Mini-batch train/validate over shards already on disk, checkpointing every epoch."""
     if manifest.train_windows == 0:
@@ -137,6 +138,7 @@ def train_from_shards(
         checkpoint = {
             "epoch": epoch, "model_state": model.state_dict(), "optimiser_state": optimiser.state_dict(),
             "train_loss": train_loss, "val_loss": val_loss,
+            "source": source, "start": start.isoformat() if start else None, "end": end.isoformat() if end else None,
         }
         epoch_path = checkpoint_dir / f"epoch_{epoch:03d}.pt"
         torch.save(checkpoint, epoch_path)
@@ -183,7 +185,10 @@ async def run_training(
 
     device = resolve_device(device_name)
     print(f"training on device={device}")
-    model, losses = train_from_shards(manifest, epochs, learning_rate, batch_size, device, checkpoint_dir, resume_from)
+    model, losses = train_from_shards(
+        manifest, epochs, learning_rate, batch_size, device, checkpoint_dir, resume_from,
+        source=source, start=start, end=end,
+    )
     return model, losses, cache_dir
 
 
