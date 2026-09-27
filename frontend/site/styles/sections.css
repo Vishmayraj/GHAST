@@ -356,14 +356,19 @@
   padding: var(--space-6);
 }
 
-.data-card__index {
-  font-family: var(--font-mono);
-  color: var(--ocean-400);
-  font-size: var(--step-h3);
+.data-card--link {
+  text-decoration: none;
+  color: inherit;
+  display: block;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+
+.data-card--link:hover,
+.data-card--link:focus-visible {
+  border-color: var(--ocean-400);
 }
 
 .data-card__title {
-  margin-top: var(--space-2);
   font-weight: 600;
   font-size: 1.0625rem;
 }
