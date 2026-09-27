@@ -11,3 +11,6 @@ infra/docker/.env
 
 # OS
 .DS_Store
+
+# ML
+*.pt
