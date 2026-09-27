@@ -68,14 +68,6 @@ a {
   padding: calc(var(--nav-height) + var(--space-16)) var(--space-6) var(--space-16);
 }
 
-.page-hero__eyebrow {
-  font-family: var(--font-mono);
-  font-size: var(--step-ticker);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ocean-300);
-}
-
 .page-hero__title {
   margin-top: var(--space-3);
   font-size: var(--step-h1);
@@ -112,23 +104,11 @@ a {
 }
 
 .eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-mono);
-  font-size: var(--step-ticker);
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
   color: var(--ocean-600);
-  margin-bottom: var(--space-4);
-}
-
-.eyebrow::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+  margin-bottom: var(--space-2);
 }
 
 .section__title {
