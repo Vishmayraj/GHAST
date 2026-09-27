@@ -185,24 +185,40 @@ thousands of windows), against the validation-vessel slice of the imported April
 
 ## 9. Definition of done
 
-- [ ] `score_checkpoint.py` takes an explicit `--source` argument and no longer silently defaults
-      to `"live"`.
-- [ ] Windows are streamed and processed in bounded batches, mirroring
+Status note (this pass): items 1-3, 5 and 6 are verified done by reading the current code on a
+fresh checkout. Item 4's logging exists in code but hasn't produced a real-run number yet. Items
+7-9 need a live Postgres/TimescaleDB instance and (for GPU numbers) a CUDA device to actually
+execute `score_checkpoint.py` against; this pass had neither (no DB, no installed ML deps, and
+per instruction no new installs), so they're left unchecked rather than marked done on the strength
+of code review alone. `OPERATING_THRESHOLD` is correctly still `None` in `threshold.py` - do not
+set it without that real run.
+
+- [x] `score_checkpoint.py` takes an explicit `--source` argument and no longer silently defaults
+      to `"live"`. (It still *defaults* to `"live"` when `--source` is omitted, matching
+      `train.py::main()`'s own convention for the same choice - the bug was that "historical"
+      couldn't be selected at all, not that live isn't the default.)
+- [x] Windows are streamed and processed in bounded batches, mirroring
       `ml/training/dataset_cache.py`; `load_training_windows()`'s full-materialize call is no
       longer used in the evaluation path.
-- [ ] A batched scoring function exists in `ml/models/bilstm/infer.py`, used by
+- [x] A batched scoring function exists in `ml/models/bilstm/infer.py`, used by
       `score_checkpoint.py` instead of one-window-at-a-time calls; a test confirms it matches
       single-window scoring.
 - [ ] Process RSS and GPU utilization are both logged and reported for a real run, with the
       OS-level "95% used" figure explicitly distinguished from process RSS in the write-up.
-- [ ] The eval set is built from `is_validation_vessel`-filtered windows only, logged explicitly
+      (Logging itself - `_profile()` in `score_checkpoint.py` - is in place; no real run has
+      produced the numbers to report yet.)
+- [x] The eval set is built from `is_validation_vessel`-filtered windows only, logged explicitly
       as the holdout method, both in console output and in MLflow.
-- [ ] `train.py` checkpoints going forward record `source`/`start`/`end`; `score_checkpoint.py`
+- [x] `train.py` checkpoints going forward record `source`/`start`/`end`; `score_checkpoint.py`
       reads them gracefully (missing-field fallback, not a crash) for older checkpoints.
 - [ ] MLflow points at a SQLite backend, not the deprecated filesystem store; a real run is
-      confirmed logged (not skipped with `--no-mlflow`).
+      confirmed logged (not skipped with `--no-mlflow`). (`DEFAULT_MLFLOW_TRACKING_URI` is already
+      `sqlite:///mlruns/mlflow.db` and `mlruns/` is gitignored; the "confirmed logged" half still
+      needs an actual run.)
 - [ ] `test_score_checkpoint.py` confirmed passing locally, and CI's path filters confirmed to
-      actually cover it.
+      actually cover it. (`.github/workflows/ml-evaluation-tests.yml` does watch
+      `ml/evaluation/**`, `ml/features/**` and `ml/models/bilstm/**`, so the filter itself looks
+      correct on inspection; nothing in this pass actually ran pytest to confirm green.)
 - [ ] A corrected evaluation run completed at real scale (not the 1,000-window development cap),
       with per-pattern results reported honestly, including if the control false-positive rate is
       still high.
@@ -212,4 +228,9 @@ thousands of windows), against the validation-vessel slice of the imported April
       beats-baseline verdict).
 
 Do not start a live scoring service, agent wiring, or Laya integration until every box above is
-checked. Those remain separate documents that follow this one.
+checked. Those remain separate documents that follow this one. (Note: `agent/orchestrator/` and
+`agent/tools/freeze_corroboration.py` already exist and already import `OPERATING_THRESHOLD` -
+that work happened ahead of this gate; it degrades safely, since `form_hypothesis` treats
+`OPERATING_THRESHOLD is None` as "unresolved, escalate for human review" rather than guessing. It's
+flagged here rather than unwound, since undoing already-committed, safely-degrading work isn't
+obviously the right call - but the sequencing this document asked for wasn't followed.)
