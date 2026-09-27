@@ -43,3 +43,36 @@ def speed_jump_detector(observation: AISObservation) -> float:
     sense against gps_spoofing_mass.
     """
     return abs(observation.acceleration) if observation.acceleration is not None else 0.0
+
+
+# Position-implied speed at or below this (knots) counts as "no real motion between
+# consecutive reports" for freeze_replay_detector - loose enough to absorb ordinary
+# GPS/haversine jitter on a genuinely stationary or near-stationary vessel, tight
+# enough that it doesn't fire on normal slow cruising.
+FREEZE_DISPLACEMENT_EPSILON_KNOTS = 0.5
+
+
+def freeze_replay_detector(observation: AISObservation) -> float:
+    """Score = how far a report's own claimed speed exceeds its actual, position-implied motion.
+
+    prediction_error_detector's per-step L2 error can miss a frozen or replayed
+    report (the followup run's own per-pattern breakdown found freeze/replay F1
+    only 0.244) - a frozen position is not necessarily a large next-step
+    prediction error, it just isn't a *new* position. This detector looks at the
+    thing the injector actually does instead: `sog` claiming ongoing movement
+    while `implied_speed` (the position delta from the previous report, converted
+    to knots) is at or below FREEZE_DISPLACEMENT_EPSILON_KNOTS, i.e. the vessel
+    didn't actually go anywhere despite saying it was moving.
+
+    Returns 0.0 (no signal) when either field is missing, or when the observed
+    displacement is above the near-zero epsilon (ordinary motion, not a freeze).
+    """
+    if observation.sog is None or observation.implied_speed is None:
+        return 0.0
+    if observation.implied_speed < 0 or observation.implied_speed > FREEZE_DISPLACEMENT_EPSILON_KNOTS:
+        # implied_speed < 0 is features.extract.MISSING_VALUE's sentinel (first
+        # report in a window, or a non-positive elapsed time) - a real distance-
+        # implied speed is never negative, so this can't be confused with a
+        # genuine near-zero reading.
+        return 0.0
+    return max(0.0, observation.sog - observation.implied_speed)

@@ -35,6 +35,14 @@ class AISObservation:
     acceleration: float | None = None
     delta_heading: float | None = None
     prediction_error: float | None = None
+    # Position-implied speed between this report and the previous one
+    # (features.extract.IMPLIED_SPEED_INDEX, MISSING_VALUE/-1.0 sentinel for the
+    # first report in a window or a non-positive elapsed time), distinct from the
+    # vessel's own reported `sog` above. evaluation.baselines.freeze_replay_detector
+    # compares the two to catch a frozen/replayed report claiming movement it
+    # didn't actually make. Only populated where the caller has real feature
+    # windows to derive it from (currently score_checkpoint.py::score_injected_windows).
+    implied_speed: float | None = None
     # Which synthetic injector produced this row (see features.inject.SPOOF_PATTERNS),
     # or None for an unmodified control row. Only ever populated for
     # injected_synthetic-sourced observations; every other loader leaves this at

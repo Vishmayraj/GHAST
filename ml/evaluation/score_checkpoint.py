@@ -40,10 +40,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from evaluation.baselines import Detector, prediction_error_detector, speed_jump_detector
+from evaluation.baselines import Detector, freeze_replay_detector, prediction_error_detector, speed_jump_detector
 from evaluation.datasets import AISObservation
 from evaluation.harness import EvaluationResult, evaluate
-from features.extract import COG_INDEX, HEADING_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
+from features.extract import COG_INDEX, HEADING_INDEX, IMPLIED_SPEED_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
 from features.inject import InjectedWindow, build_synthetic_dataset
 from features.pipeline import TrainingDataSource, stream_feature_windows
 from models.bilstm.infer import prediction_errors_batch
@@ -97,8 +97,11 @@ def score_injected_windows(model: BiLSTMNextDelta, injected_windows: list[Inject
 
     Mirrors datasets.py::load_injected_synthetic's flattening shape, but sets
     `prediction_error` to this model's real scored value (instead of leaving it
-    unset) and carries `injected.pattern` through so later reporting can break
-    results out by spoof pattern without re-deriving it from window structure.
+    unset), carries `injected.pattern` through so later reporting can break
+    results out by spoof pattern without re-deriving it from window structure,
+    and also populates `implied_speed` (features.extract.IMPLIED_SPEED_INDEX) so
+    evaluation.baselines.freeze_replay_detector has the position-implied-motion
+    signal it needs alongside the vessel's own reported `sog`.
     """
     observations: list[AISObservation] = []
     errors_per_window = prediction_errors_batch(model, [injected.window for injected in injected_windows])
@@ -119,6 +122,7 @@ def score_injected_windows(model: BiLSTMNextDelta, injected_windows: list[Inject
                 is_spoofed=is_spoofed,
                 prediction_error=float(errors[index]),
                 acceleration=accelerations[index],
+                implied_speed=float(row_features[IMPLIED_SPEED_INDEX]),
                 pattern=injected.pattern,
                 source="injected_synthetic_scored",
             ))

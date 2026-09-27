@@ -22,13 +22,14 @@ import argparse
 import sys
 from dataclasses import dataclass
 
-from .baselines import Detector, prediction_error_detector, speed_jump_detector
+from .baselines import Detector, freeze_replay_detector, prediction_error_detector, speed_jump_detector
 from .datasets import DATASET_LOADERS, AISObservation
 from .metrics import EvaluationMetrics, precision_recall_f1
 
 DETECTORS: dict[str, Detector] = {
     "prediction_error": prediction_error_detector,
     "speed_jump": speed_jump_detector,
+    "freeze_replay": freeze_replay_detector,
 }
 
 
