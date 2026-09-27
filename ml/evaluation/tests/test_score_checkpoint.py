@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pytest
 
-from evaluation.baselines import prediction_error_detector, speed_jump_detector
+from evaluation.baselines import freeze_replay_detector, prediction_error_detector, speed_jump_detector
 from evaluation.score_checkpoint import (
     per_pattern_breakdown,
     score_injected_windows,
@@ -131,3 +131,17 @@ def test_speed_jump_detector_also_scores_these_observations(tiny_model, injected
     scores = [speed_jump_detector(o) for o in observations]
     assert len(scores) == len(observations)
     assert all(isinstance(score, float) for score in scores)
+
+
+def test_freeze_replay_detector_also_scores_these_observations(tiny_model, injected_windows):
+    # Per ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md section 3:
+    # freeze_replay_detector reads observation.sog and observation.implied_speed,
+    # both of which score_injected_windows populates (see that function's own
+    # docstring) - confirms the sweep added in score_checkpoint.py::run() can
+    # actually call this detector on injected-synthetic output without a missing-field
+    # crash, the same guarantee the existing speed_jump test above pins for that detector.
+    observations = score_injected_windows(tiny_model, injected_windows)
+    scores = [freeze_replay_detector(o) for o in observations]
+    assert len(scores) == len(observations)
+    assert all(isinstance(score, float) for score in scores)
+    assert all(score >= 0.0 for score in scores)

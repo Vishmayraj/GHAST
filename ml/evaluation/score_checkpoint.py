@@ -41,6 +41,7 @@ import numpy as np
 import torch
 
 from evaluation.baselines import Detector, freeze_replay_detector, prediction_error_detector, speed_jump_detector
+from features.inject import SPOOF_PATTERNS
 from evaluation.datasets import AISObservation
 from evaluation.harness import EvaluationResult, evaluate
 from features.extract import COG_INDEX, HEADING_INDEX, IMPLIED_SPEED_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
@@ -58,6 +59,8 @@ THRESHOLD_SWEEP_POINTS = 25
 DEFAULT_EVAL_BATCH_SIZE = 1024
 PROFILE_EVERY_BATCHES = 10
 HOLDOUT_METHOD = "validation_vessel_split (fraction=0.2)"
+FREEZE_REPLAY_PATTERN_LABEL = "freeze_replay"
+assert FREEZE_REPLAY_PATTERN_LABEL in SPOOF_PATTERNS  # stay in sync with features.inject's own name
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[BiLSTMNextDelta, dict]:
@@ -339,15 +342,39 @@ async def run(
             observations, "speed_jump", speed_jump_detector,
             threshold_candidates([speed_jump_detector(o) for o in observations]),
         ),
+        # Added per ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md section 3:
+        # prediction_error_detector's own per-pattern breakdown (the followup run) found
+        # freeze/replay its weakest pattern (F1=0.244) - a frozen position doesn't
+        # necessarily produce a large next-step prediction error, it just isn't a *new*
+        # position, which is exactly the signature freeze_replay_detector looks for
+        # instead. Swept and broken down the same way as the other two detectors so this
+        # run reports directly whether it actually improves on 0.244, rather than just
+        # asserting it should.
+        "freeze_replay": sweep_thresholds(
+            observations, "freeze_replay", freeze_replay_detector,
+            threshold_candidates([freeze_replay_detector(o) for o in observations]),
+        ),
     }
     for sweep in sweeps.values():
         _print_sweep(sweep)
 
     chosen = sweeps["prediction_error"].best_by_f1()
     baseline_best = sweeps["speed_jump"].best_by_f1()
+    freeze_replay_best = sweeps["freeze_replay"].best_by_f1()
 
     breakdown = per_pattern_breakdown(observations, prediction_error_detector, chosen.threshold)
     _print_breakdown(breakdown, chosen.threshold)
+
+    freeze_replay_breakdown = per_pattern_breakdown(observations, freeze_replay_detector, freeze_replay_best.threshold)
+    prior_freeze_replay_f1 = breakdown.get(FREEZE_REPLAY_PATTERN_LABEL)
+    new_freeze_replay_f1 = freeze_replay_breakdown.get(FREEZE_REPLAY_PATTERN_LABEL)
+    if prior_freeze_replay_f1 is not None and new_freeze_replay_f1 is not None:
+        comparison = "improves on" if new_freeze_replay_f1.metrics.f1 > prior_freeze_replay_f1.metrics.f1 else "does not improve on"
+        print(
+            f"\nfreeze_replay_detector on the freeze_replay pattern: F1={new_freeze_replay_f1.metrics.f1:.3f} "
+            f"@ threshold={freeze_replay_best.threshold:.6f} ({comparison} prediction_error_detector's "
+            f"F1={prior_freeze_replay_f1.metrics.f1:.3f} on the same pattern)."
+        )
 
     if chosen.metrics.f1 > baseline_best.metrics.f1:
         verdict = "beats"
