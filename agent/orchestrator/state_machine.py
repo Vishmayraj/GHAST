@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from models.bilstm.threshold import OPERATING_THRESHOLD
+from tools.freeze_corroboration import corroborate_freeze_replay
 
 REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate with reviewed incidents in Stage 3.
 
@@ -48,6 +49,20 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
         # ESCALATING for human review rather than auto-reporting a guess.
         return "unresolved", 0.0
     if anomaly.anomaly_score < OPERATING_THRESHOLD: return "benign", 0.75
+    # investigate() populates evidence["freeze_corroboration"] (see
+    # tools.freeze_corroboration.corroborate_freeze_replay) from track_history's raw
+    # position sequence - an independent signal from the model's own anomaly_score.
+    # A caller that built its own evidence dict without that key (older callers, or
+    # the tests in test_state_machine.py exercising form_hypothesis directly) gets
+    # `{}` here, which .get("matched") reads as not-corroborated, falling straight
+    # through to the pre-existing targeted_spoof/equipment_fault tiers unchanged -
+    # this branch only ever adds a new, more specific tier, never removes the old ones.
+    if evidence.get("freeze_corroboration", {}).get("matched"):
+        # Two independent signals agreeing (the model's own threshold crossing, plus
+        # a frozen/replayed position visible directly in track_history) earns a
+        # higher, auto-reporting confidence than the single-signal tiers below,
+        # though still short of jamming's stronger direct zone match above.
+        return "freeze_replay", 0.8
     if not evidence["incident_history"].get("similar_incidents"): return "targeted_spoof", 0.72
     return "equipment_fault", 0.55
 
@@ -56,6 +71,10 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
     log: list[dict[str, Any]] = []; evidence: dict[str, Any] = {}
     for name in ("track_history", "jamming_zones", "incident_history"):
         result = await tools[name](anomaly); evidence[name] = result; log.append({"tool": name, "result": result})
+    # Derived, not a tool call: computed once here from track_history's own result
+    # so it's logged in evidence (persisted, and available to the report drafter)
+    # without inflating tool_call_log's count of actual evidence-gathering calls.
+    evidence["freeze_corroboration"] = corroborate_freeze_replay(evidence["track_history"])
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     state = InvestigationState.REPORTING if confidence >= REPORT_CONFIDENCE_THRESHOLD else InvestigationState.ESCALATING
     row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude)}

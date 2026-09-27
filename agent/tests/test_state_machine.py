@@ -38,3 +38,61 @@ def test_score_just_above_threshold_is_not_benign() -> None:
     anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20)
     hypothesis, confidence = form_hypothesis(anomaly, _NEUTRAL_EVIDENCE)
     assert hypothesis != "benign"
+
+# freeze_corroboration tiering: investigate() populates evidence["freeze_corroboration"]
+# from tools.freeze_corroboration.corroborate_freeze_replay (see that module); these
+# pin form_hypothesis's own handling of it directly, without needing a real
+# track_history tool call.
+_FREEZE_MATCHED = {"matched": True, "frozen_reports": 2, "total_pairs": 2}
+_FREEZE_NOT_MATCHED = {"matched": False, "frozen_reports": 0, "total_pairs": 3}
+
+def test_freeze_corroboration_promotes_to_freeze_replay_hypothesis() -> None:
+    assert OPERATING_THRESHOLD is not None, "OPERATING_THRESHOLD must be finalized before this test is meaningful"
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20)
+    hypothesis, confidence = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_MATCHED})
+    assert hypothesis == "freeze_replay"
+    assert confidence >= 0.7  # must clear REPORT_CONFIDENCE_THRESHOLD to auto-report, not escalate
+
+def test_freeze_corroboration_not_matched_falls_back_to_existing_tiers() -> None:
+    assert OPERATING_THRESHOLD is not None, "OPERATING_THRESHOLD must be finalized before this test is meaningful"
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20)
+    hypothesis, _ = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_NOT_MATCHED})
+    assert hypothesis == "targeted_spoof"  # unchanged pre-existing tier, from _NEUTRAL_EVIDENCE's empty similar_incidents
+
+def test_missing_freeze_corroboration_key_is_backward_compatible() -> None:
+    # An evidence dict built by a caller that predates freeze_corroboration entirely
+    # (exactly _NEUTRAL_EVIDENCE's own shape) must fall through identically to the
+    # not-matched case above, not raise a KeyError.
+    assert OPERATING_THRESHOLD is not None, "OPERATING_THRESHOLD must be finalized before this test is meaningful"
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20)
+    hypothesis, _ = form_hypothesis(anomaly, _NEUTRAL_EVIDENCE)
+    assert hypothesis == "targeted_spoof"
+
+def test_jamming_match_takes_priority_over_freeze_corroboration() -> None:
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.9, "position", 10, 20)
+    evidence = {"jamming_zones": {"matched": True}, "incident_history": {"similar_incidents": []}, "freeze_corroboration": _FREEZE_MATCHED}
+    hypothesis, confidence = form_hypothesis(anomaly, evidence)
+    assert hypothesis == "jamming"
+    assert confidence == 0.85
+
+@pytest.mark.asyncio
+async def test_investigate_threads_freeze_corroboration_from_track_history() -> None:
+    # Same frozen-position/claimed-speed shape agent/tests/test_freeze_corroboration.py
+    # exercises directly against corroborate_freeze_replay - here confirming
+    # investigate() actually wires track_history's tool result through to it and into
+    # the persisted evidence, not just that form_hypothesis handles the key once given.
+    frozen_positions = {
+        "positions": [
+            {"received_at": datetime(2026, 1, 1, tzinfo=timezone.utc), "latitude": 10.0, "longitude": 20.0, "sog_knots": 12.0, "cog_deg": 90.0},
+            {"received_at": datetime(2026, 1, 1, 0, 1, tzinfo=timezone.utc), "latitude": 10.0, "longitude": 20.0, "sog_knots": 12.0, "cog_deg": 90.0},
+        ]
+    }
+    saved = []
+    async def persist(row): saved.append(row)
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), (OPERATING_THRESHOLD or 0.0) + 1e-6, "position", 10, 20)
+    tools = {"track_history": await _tool(frozen_positions), "jamming_zones": await _tool({"matched": False}), "incident_history": await _tool({"similar_incidents": []})}
+    result = await investigate(anomaly, tools, persist)
+    assert result.evidence["freeze_corroboration"]["matched"] is True
+    assert saved[0]["evidence"]["freeze_corroboration"]["matched"] is True
+    if OPERATING_THRESHOLD is not None:
+        assert result.hypothesis == "freeze_replay"
