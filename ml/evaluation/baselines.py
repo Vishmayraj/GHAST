@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from features.extract import FREEZE_DISPLACEMENT_EPSILON_KNOTS
+
 from .datasets import AISObservation
 
 Detector = Callable[[AISObservation], float]
@@ -43,13 +45,6 @@ def speed_jump_detector(observation: AISObservation) -> float:
     sense against gps_spoofing_mass.
     """
     return abs(observation.acceleration) if observation.acceleration is not None else 0.0
-
-
-# Position-implied speed at or below this (knots) counts as "no real motion between
-# consecutive reports" for freeze_replay_detector - loose enough to absorb ordinary
-# GPS/haversine jitter on a genuinely stationary or near-stationary vessel, tight
-# enough that it doesn't fire on normal slow cruising.
-FREEZE_DISPLACEMENT_EPSILON_KNOTS = 0.5
 
 
 def freeze_replay_detector(observation: AISObservation) -> float:

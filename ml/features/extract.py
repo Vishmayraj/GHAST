@@ -26,6 +26,17 @@ HEADING_MISSING_INDEX = 6
 RATE_OF_TURN_MISSING_INDEX = 7
 N_FEATURES = 8
 
+# Position-implied speed at or below this (knots) counts as "no real motion between
+# consecutive reports" - loose enough to absorb ordinary GPS/haversine jitter on a
+# genuinely stationary or near-stationary vessel, tight enough that it doesn't fire
+# on normal slow cruising. Lives here (not evaluation/baselines.py, its original
+# home) because it's a property of the implied-speed feature itself, and both
+# evaluation.baselines.freeze_replay_detector (scores a precomputed feature column)
+# and agent.tools.freeze_corroboration (recomputes the same comparison directly from
+# track_history's raw position sequence via implied_speed_knots below) need the exact
+# same number without one importing the other's heavier dependency chain.
+FREEZE_DISPLACEMENT_EPSILON_KNOTS = 0.5
+
 
 def _as_datetime(value: datetime | str) -> datetime:
     """Accept database datetimes and ISO strings so fixtures use production shape."""
