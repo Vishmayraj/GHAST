@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from orchestrator.state_machine import FlaggedAnomaly, InvestigationState, form_hypothesis, investigate
+from orchestrator.state_machine import REPORT_CONFIDENCE_THRESHOLD, FlaggedAnomaly, InvestigationState, form_hypothesis, investigate
 from models.bilstm.threshold import OPERATING_THRESHOLD
 
 # OPERATING_THRESHOLD stays None until evaluation/score_checkpoint.py has produced a
@@ -84,6 +84,66 @@ def test_jamming_match_takes_priority_over_freeze_corroboration() -> None:
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     assert hypothesis == "jamming"
     assert confidence == 0.85
+
+# detector_votes corroboration cap (ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md
+# section 3): a flag where only one of the live scorer's detectors fired is weaker
+# evidence than one where two or more independently agree.
+@requires_operating_threshold
+def test_single_detector_vote_caps_confidence_below_report_threshold() -> None:
+    anomaly = FlaggedAnomaly(
+        1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20,
+        detector_votes=frozenset({"prediction_error"}),
+    )
+    hypothesis, confidence = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_MATCHED})
+    assert hypothesis == "freeze_replay"  # the tier itself is unaffected, only its confidence
+    assert confidence < REPORT_CONFIDENCE_THRESHOLD  # escalates instead of auto-reporting
+
+@requires_operating_threshold
+def test_two_detector_votes_are_not_capped() -> None:
+    anomaly = FlaggedAnomaly(
+        1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20,
+        detector_votes=frozenset({"prediction_error", "freeze_replay"}),
+    )
+    hypothesis, confidence = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_MATCHED})
+    assert hypothesis == "freeze_replay"
+    assert confidence == 0.8  # unchanged from the uncapped tier
+
+def test_untracked_detector_votes_is_not_treated_as_single_detector() -> None:
+    # The default (no detector_votes passed at all) must behave exactly like every
+    # pre-existing test above that never set this field - an empty/untracked value is
+    # not the same thing as "exactly one detector fired".
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.9, "position", 10, 20)
+    evidence = {"jamming_zones": {"matched": True}, "incident_history": {"similar_incidents": []}, "freeze_corroboration": _FREEZE_MATCHED}
+    hypothesis, confidence = form_hypothesis(anomaly, evidence)
+    assert hypothesis == "jamming"
+    assert confidence == 0.85
+
+@requires_operating_threshold
+def test_single_detector_vote_does_not_cap_jamming() -> None:
+    # A zone match is its own strong, independent signal - not one of the three score
+    # detectors this cap is meant to corroborate against - so it must stay uncapped
+    # even when detector_votes has exactly one entry.
+    anomaly = FlaggedAnomaly(
+        1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20,
+        detector_votes=frozenset({"prediction_error"}),
+    )
+    evidence = {"jamming_zones": {"matched": True}, "incident_history": {"similar_incidents": []}}
+    hypothesis, confidence = form_hypothesis(anomaly, evidence)
+    assert hypothesis == "jamming"
+    assert confidence == 0.85
+
+@pytest.mark.asyncio
+async def test_investigate_logs_detector_corroboration_in_evidence() -> None:
+    saved = []
+    async def persist(row): saved.append(row)
+    anomaly = FlaggedAnomaly(
+        1, datetime.now(timezone.utc), 0.9, "position", 10, 20,
+        detector_votes=frozenset({"prediction_error", "speed_jump"}),
+    )
+    tools = {"track_history": await _tool({"positions": []}), "jamming_zones": await _tool({"matched": True}), "incident_history": await _tool({"similar_incidents": []})}
+    result = await investigate(anomaly, tools, persist, report=lambda row: _report())
+    assert result.evidence["detector_corroboration"] == {"votes": ["prediction_error", "speed_jump"], "count": 2}
+    assert saved[0]["evidence"]["detector_corroboration"]["count"] == 2
 
 @pytest.mark.asyncio
 async def test_investigate_threads_freeze_corroboration_from_track_history() -> None:
