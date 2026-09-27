@@ -45,7 +45,7 @@ from evaluation.datasets import AISObservation
 from evaluation.harness import EvaluationResult, evaluate
 from features.extract import COG_INDEX, HEADING_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
 from features.inject import InjectedWindow, build_synthetic_dataset
-from features.pipeline import load_training_windows
+from features.pipeline import stream_feature_windows
 from models.bilstm.infer import prediction_errors
 from models.bilstm.model import BiLSTMNextDelta
 
@@ -261,7 +261,21 @@ async def run(
     )
     print(f"eval range: {eval_start.isoformat()}..{eval_end.isoformat()} (seed={seed}, device={device})")
 
-    windows = await load_training_windows(dsn, eval_start, eval_end)
+    windows = [
+        window
+        async for window in stream_feature_windows(
+            dsn,
+            eval_start,
+            eval_end,
+            source="historical",
+            max_windows=1000,
+            progress_every=50_000,
+            on_progress=lambda rows, vessels, windows: print(
+                f"loading: {rows:,} rows | {vessels:,} vessels | {windows:,} windows",
+                flush=True,
+            ),
+        )
+    ]
     if not windows:
         print(f"no clean windows found for {eval_start.isoformat()}..{eval_end.isoformat()}", file=sys.stderr)
         return 1

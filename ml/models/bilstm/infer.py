@@ -12,10 +12,25 @@ from .model import BiLSTMNextDelta
 def prediction_errors(model: BiLSTMNextDelta, window: FeatureWindow) -> np.ndarray:
     """Score each transition; the first report has no preceding prediction and is zero."""
     model.eval()
+    device = next(model.parameters()).device
+
     with torch.no_grad():
-        features = torch.from_numpy(window.features).unsqueeze(0).float()
-        classes = torch.from_numpy(window.features[:, VESSEL_CLASS_INDEX].astype(np.int64)).unsqueeze(0)
+        features = (
+            torch.from_numpy(window.features)
+            .unsqueeze(0)
+            .float()
+            .to(device)
+        )
+        classes = (
+            torch.from_numpy(
+                window.features[:, VESSEL_CLASS_INDEX].astype(np.int64)
+            )
+            .unsqueeze(0)
+            .to(device)
+        )
+
         predicted = model(features, classes).squeeze(0).cpu().numpy()
+
     actual = np.diff(window.positions, axis=0)
     errors = np.zeros(len(window.positions), dtype=np.float64)
     errors[1:] = np.linalg.norm(predicted[:-1] - actual, axis=1)
