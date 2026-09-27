@@ -6,6 +6,8 @@ from enum import Enum
 import json
 from typing import Any
 
+from models.bilstm.threshold import OPERATING_THRESHOLD
+
 REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate with reviewed incidents in Stage 3.
 
 class InvestigationState(str, Enum):
@@ -37,7 +39,15 @@ async def persist_incident(connection: Any, row: dict[str, Any]) -> None:
 def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[str, float]:
     """Use transparent Stage 1 rules until reviewed incidents support learned decisions."""
     if evidence["jamming_zones"].get("matched"): return "jamming", 0.85
-    if anomaly.anomaly_score < 0.3: return "benign", 0.75
+    if OPERATING_THRESHOLD is None:
+        # Should not happen once ml/models/bilstm/threshold.py is finalized (see that
+        # module's provenance comment); a guessed fallback constant here would silently
+        # misclassify at whatever scale a future retrained model happens to score at.
+        # "unresolved" is the schema's own default hypothesis value (backend/models/schema.sql)
+        # and a confidence below REPORT_CONFIDENCE_THRESHOLD routes this straight to
+        # ESCALATING for human review rather than auto-reporting a guess.
+        return "unresolved", 0.0
+    if anomaly.anomaly_score < OPERATING_THRESHOLD: return "benign", 0.75
     if not evidence["incident_history"].get("similar_incidents"): return "targeted_spoof", 0.72
     return "equipment_fault", 0.55
 
