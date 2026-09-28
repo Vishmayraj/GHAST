@@ -2,15 +2,15 @@ import pytest
 from types import SimpleNamespace
 from report_generator.report import DEFAULT_REPORT_MODEL, draft_report, report_model
 
-class _FakeMessages:
+class _FakeCompletions:
     def __init__(self, content): self.calls = []; self._content = content
     async def create(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(content=self._content)
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=self._content))])
 
 def _client(content):
-    messages = _FakeMessages(content)
-    return SimpleNamespace(messages=messages), messages
+    completions = _FakeCompletions(content)
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions)), completions
 
 def test_report_model_defaults_when_env_unset(monkeypatch) -> None:
     monkeypatch.delenv("GHAST_REPORT_MODEL", raising=False)
@@ -21,8 +21,13 @@ def test_report_model_reads_env_override(monkeypatch) -> None:
     assert report_model() == "some-future-model"
 
 @pytest.mark.asyncio
-async def test_draft_report_uses_configured_model_and_skips_thinking_blocks(monkeypatch) -> None:
+async def test_draft_report_uses_configured_model(monkeypatch) -> None:
     monkeypatch.setenv("GHAST_REPORT_MODEL", "some-future-model")
-    client, messages = _client([SimpleNamespace(type="thinking", thinking="..."), SimpleNamespace(type="text", text="the report")])
+    client, completions = _client("the report")
     assert await draft_report({"mmsi": 1}, client) == "the report"
-    assert messages.calls[0]["model"] == "some-future-model"
+    assert completions.calls[0]["model"] == "some-future-model"
+
+@pytest.mark.asyncio
+async def test_draft_report_allows_empty_provider_content() -> None:
+    client, _ = _client(None)
+    assert await draft_report({"mmsi": 1}, client) == ""

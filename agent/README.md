@@ -11,10 +11,10 @@ Design principles (carried over from the proposal, MIP section 4.2): the agent n
 ## Test the bounded workflow
 
 From `C:\Projects\GHAST\agent`, install the test dependencies and run the
-mock-only suite. It makes no database or Claude API request:
+mock-only suite. It makes no database or Groq API request:
 
 ```powershell
-python -m pip install pytest pytest-asyncio
+python -m pip install -r requirements-dev.txt
 python -m pytest tests -v
 ```
 
@@ -31,5 +31,6 @@ docker compose exec timescaledb psql -U ghast -d ghast -c "SELECT id, mmsi, flag
 
 An acceptable real run has either `status = 'escalated'` or a non-empty
 `report_text`, and exactly the three evidence tool calls in `audit_entries`.
-Never put the Claude credential in source control; inject it only through the
-runtime environment used by the report-drafting caller.
+Never put the Groq credential in source control; inject `GROQ_API_KEY` only through
+the runtime environment used by the report-drafting caller. The default report model
+is `openai/gpt-oss-120b`; set `GHAST_REPORT_MODEL` to override it.

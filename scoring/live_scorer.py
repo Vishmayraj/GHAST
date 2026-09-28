@@ -21,7 +21,7 @@ Design notes worth knowing before changing anything:
   prediction-error detector, so in live traffic a large share of single-detector flags
   are expected to be noise. The state machine caps single-detector confidence so those
   escalate instead of auto-reporting, and --max-investigations-per-cycle bounds how many
-  investigations (and Claude report calls) one poll can start. Both are first-pass
+  investigations (and Groq report calls) one poll can start. Both are first-pass
   mitigations; per-vessel-class or per-region threshold normalization is future work.
 * freeze_replay's trigger defaults to features.extract.FREEZE_DISPLACEMENT_EPSILON_KNOTS,
   matching the agent's own corroboration check. speed_jump has no swept threshold on
@@ -34,7 +34,7 @@ Usage (from the repo root, with the ml/ and agent/ dependencies installed):
     # one cycle over the last 6 hours of live data, then exit:
     python live_scorer.py ... --once --initial-lookback-minutes 360
 
-Set ANTHROPIC_API_KEY to have reportable incidents drafted by Claude (model from
+Set GROQ_API_KEY to have reportable incidents drafted through Groq (model from
 GHAST_REPORT_MODEL); without it incidents are still persisted, just with no report_text.
 """
 from __future__ import annotations
@@ -421,7 +421,11 @@ def load_model_scorer(checkpoint_path: Path, device_name: str | None) -> tuple[S
 
 async def _serve(args: argparse.Namespace) -> int:
     import asyncpg
+    from dotenv import load_dotenv
 
+    # Local development keeps credentials in the repository's ignored .env. Do not
+    # override an environment value supplied by Docker, CI, or the process manager.
+    load_dotenv(_REPO_ROOT / ".env")
     score_errors, checkpoint = load_model_scorer(Path(args.checkpoint), args.device)
     logger.info(
         "loaded checkpoint=%s epoch=%s operating_threshold=%s",
@@ -429,11 +433,11 @@ async def _serve(args: argparse.Namespace) -> int:
     )
 
     report: Report | None = None
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        import anthropic
-        report = build_report(anthropic.AsyncAnthropic())
+    if os.environ.get("GROQ_API_KEY"):
+        from groq import AsyncGroq
+        report = build_report(AsyncGroq())
     else:
-        logger.warning("ANTHROPIC_API_KEY not set: reportable incidents are persisted without report_text")
+        logger.warning("GROQ_API_KEY not set: reportable incidents are persisted without report_text")
 
     config = ScorerConfig(
         thresholds=DetectorThresholds(
