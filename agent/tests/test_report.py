@@ -31,3 +31,22 @@ async def test_draft_report_uses_configured_model(monkeypatch) -> None:
 async def test_draft_report_allows_empty_provider_content() -> None:
     client, _ = _client(None)
     assert await draft_report({"mmsi": 1}, client) == ""
+
+
+@pytest.mark.asyncio
+async def test_draft_report_bounds_large_track_history_payload() -> None:
+    client, completions = _client("the report")
+    incident = {
+        "mmsi": 1,
+        "hypothesis": "freeze_replay",
+        "evidence": {"track_history": {"positions": [{"latitude": i} for i in range(5000)]}},
+    }
+
+    await draft_report(incident, client)
+
+    content = completions.calls[0]["messages"][0]["content"]
+    assert "GHAST // INCIDENT BRIEF" in content
+    assert "```mermaid" in content
+    assert '"position_count":5000' in content
+    assert '"latitude":4999' in content
+    assert '"latitude":1' not in content

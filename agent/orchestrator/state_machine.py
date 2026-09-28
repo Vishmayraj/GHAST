@@ -123,6 +123,11 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     state = InvestigationState.REPORTING if confidence >= REPORT_CONFIDENCE_THRESHOLD else InvestigationState.ESCALATING
     row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude)}
-    if state is InvestigationState.REPORTING and report is not None: row["report_text"] = await report(row)
+    if state is InvestigationState.REPORTING and report is not None:
+        report_text = await report(row)
+        # An optional provider may return an empty string after a handled outage or
+        # rate limit; keep the database value NULL rather than recording a fake report.
+        if report_text:
+            row["report_text"] = report_text
     await persist(row)
     return InvestigationResult(InvestigationState.DONE, hypothesis, confidence, evidence, log)

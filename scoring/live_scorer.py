@@ -419,7 +419,13 @@ def build_persist(db: Any) -> Persist:
 
 def build_report(client: Any) -> Report:
     async def report(row: dict[str, Any]) -> str:
-        return await draft_report(row, client)
+        try:
+            return await draft_report(row, client)
+        except Exception:
+            # Reporting is optional enrichment. Preserve the deterministic evidence
+            # and incident row even when Groq is unavailable or rate-limited.
+            logger.exception("Groq report generation failed; persisting incident without report_text")
+            return ""
     return report
 
 
@@ -455,7 +461,7 @@ async def _serve(args: argparse.Namespace) -> int:
     report: Report | None = None
     if os.environ.get("GROQ_API_KEY"):
         from groq import AsyncGroq
-        report = build_report(AsyncGroq())
+        report = build_report(AsyncGroq(max_retries=0))
     else:
         logger.warning("GROQ_API_KEY not set: reportable incidents are persisted without report_text")
 
