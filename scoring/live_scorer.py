@@ -17,6 +17,10 @@ Design notes worth knowing before changing anything:
   same old spike would re-flag on every poll while it stays inside the 20-report window.
 * A vessel with an unresolved incident newer than --debounce-hours is skipped, and so is a
   vessel this process already investigated inside that window (covers a failed persist).
+* --max-investigations-per-cycle defaults to 25. Candidates beyond that cap are retained
+  in an in-memory deferred queue and retried on the next completed poll; they are not
+  silently acknowledged. A process restart loses only that transient queue, while the
+  normal watermark/overlap scan will discover subsequent reports again.
 * The followup evaluation measured a 19.4% control false-positive rate for the
   prediction-error detector, so in live traffic a large share of single-detector flags
   are expected to be noise. The state machine caps single-detector confidence so those
@@ -302,6 +306,10 @@ class LiveScorer:
         self._watermark: datetime | None = None
         self._last_scored: dict[int, datetime] = {}
         self._cooldown: dict[int, datetime] = {}
+        # Candidates skipped by the per-cycle cap must remain eligible for a later
+        # cycle. Keep this in memory only: a process restart naturally starts from
+        # the database watermark and will score newly observed reports again.
+        self._deferred: dict[int, FlaggedAnomaly] = {}
 
     async def _is_debounced(self, mmsi: int, now: datetime) -> bool:
         window = timedelta(hours=self._config.debounce_hours)
@@ -319,7 +327,8 @@ class LiveScorer:
 
         mmsis = await self._store.active_mmsis(since)
         summary.vessels_seen = len(mmsis)
-        candidates: list[FlaggedAnomaly] = []
+        candidates_by_mmsi: dict[int, FlaggedAnomaly] = dict(self._deferred)
+        self._deferred.clear()
         for mmsi in mmsis:
             rows = await self._store.recent_reports(mmsi, not_before, WINDOW_LENGTH)
             if len(rows) < WINDOW_LENGTH:
@@ -334,10 +343,20 @@ class LiveScorer:
             self._last_scored[mmsi] = window.timestamps[-1]
             anomaly = evaluate_window(window, errors, cutoff, config.thresholds, config.min_votes)
             if anomaly is not None:
-                candidates.append(anomaly)
+                previous = candidates_by_mmsi.get(anomaly.mmsi)
+                if previous is None or (
+                    len(anomaly.detector_votes), anomaly.anomaly_score, anomaly.flagged_at
+                ) > (
+                    len(previous.detector_votes), previous.anomaly_score, previous.flagged_at
+                ):
+                    candidates_by_mmsi[anomaly.mmsi] = anomaly
 
         # Strongest evidence first, so the per-cycle cap drops the weakest flags.
-        candidates.sort(key=lambda a: (len(a.detector_votes), a.anomaly_score), reverse=True)
+        candidates = sorted(
+            candidates_by_mmsi.values(),
+            key=lambda a: (len(a.detector_votes), a.anomaly_score, a.flagged_at),
+            reverse=True,
+        )
         for anomaly in candidates:
             summary.flagged += 1
             if await self._is_debounced(anomaly.mmsi, cycle_started):
@@ -345,6 +364,7 @@ class LiveScorer:
                 continue
             if summary.investigated + summary.failed >= config.max_investigations_per_cycle:
                 summary.deferred += 1
+                self._deferred[anomaly.mmsi] = anomaly
                 logger.warning("deferred flag mmsi=%s votes=%s (per-cycle cap reached)", anomaly.mmsi, sorted(anomaly.detector_votes))
                 continue
             self._cooldown[anomaly.mmsi] = cycle_started

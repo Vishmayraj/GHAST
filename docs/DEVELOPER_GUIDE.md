@@ -105,6 +105,12 @@ the same report. Start with one database cycle:
 --min-votes 2 is the safer initial live setting. The default of one preserves
 recall but single-detector flags are escalated rather than auto-reported.
 
+The scorer permits 25 investigations per polling cycle by default
+(`--max-investigations-per-cycle`). Strongest candidates run first; candidates beyond
+the cap are retained in an in-memory deferred queue and retried on the next completed
+cycle. Debounced candidates are skipped rather than queued, and a process restart
+does not persist the transient queue.
+
 For each flag, agent/orchestrator/state_machine.py calls track_history,
 jamming_zones, and incident_history, adds sequence-based freeze/replay
 corroboration, logs votes, forms an auditable hypothesis, then persists it.
