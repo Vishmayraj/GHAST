@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS incidents (
     anomaly_type      TEXT,
     hypothesis        TEXT NOT NULL DEFAULT 'unresolved'
                           CHECK (hypothesis IN (
-                              'jamming', 'targeted_spoof',
+                              'jamming', 'targeted_spoof', 'freeze_replay',
                               'equipment_fault', 'benign', 'unresolved'
                           )),
     confidence        DOUBLE PRECISION,
@@ -87,6 +87,17 @@ CREATE TABLE IF NOT EXISTS incidents (
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- agent/orchestrator/state_machine.py::form_hypothesis can return 'freeze_replay'
+-- (added after this table's original CHECK list), and CREATE TABLE IF NOT EXISTS
+-- won't touch an already-created table - so an existing database keeps the old
+-- constraint and every freeze_replay incident INSERT would fail. Re-create the
+-- constraint idempotently (this file is re-applied on every ingestion startup).
+ALTER TABLE incidents DROP CONSTRAINT IF EXISTS incidents_hypothesis_check;
+ALTER TABLE incidents ADD CONSTRAINT incidents_hypothesis_check CHECK (hypothesis IN (
+    'jamming', 'targeted_spoof', 'freeze_replay',
+    'equipment_fault', 'benign', 'unresolved'
+));
 
 CREATE INDEX IF NOT EXISTS incidents_mmsi_flagged_idx
     ON incidents (mmsi, flagged_at DESC);
