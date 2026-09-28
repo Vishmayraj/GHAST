@@ -81,7 +81,13 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
         # and a confidence below REPORT_CONFIDENCE_THRESHOLD routes this straight to
         # ESCALATING for human review rather than auto-reporting a guess.
         return "unresolved", 0.0
-    if anomaly.anomaly_score < OPERATING_THRESHOLD: return "benign", 0.75
+    # A score below the model's threshold only means "benign" when no other detector
+    # disagrees: a freeze/replay or speed_jump flag (scoring/live_scorer.py) can fire on a
+    # window whose prediction error is low, which is exactly the case
+    # prediction_error alone was found to miss. Empty detector_votes (untracked/legacy
+    # callers) and prediction_error-only votes keep the original behavior.
+    other_detector_votes = anomaly.detector_votes - {"prediction_error"}
+    if anomaly.anomaly_score < OPERATING_THRESHOLD and not other_detector_votes: return "benign", 0.75
     # investigate() populates evidence["freeze_corroboration"] (see
     # tools.freeze_corroboration.corroborate_freeze_replay) from track_history's raw
     # position sequence - an independent signal from the model's own anomaly_score.

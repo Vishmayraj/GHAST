@@ -166,3 +166,18 @@ async def test_investigate_threads_freeze_corroboration_from_track_history() -> 
     assert saved[0]["evidence"]["freeze_corroboration"]["matched"] is True
     if OPERATING_THRESHOLD is not None:
         assert result.hypothesis == "freeze_replay"
+
+
+# A non-model detector firing on a below-threshold window must not be swallowed by the
+# benign branch (see form_hypothesis); untracked callers keep the old behavior.
+@requires_operating_threshold
+def test_other_detector_vote_below_threshold_is_not_benign() -> None:
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD / 10, "freeze_replay", 10, 20, detector_votes=frozenset({"freeze_replay"}))
+    hypothesis, _ = form_hypothesis(anomaly, _NEUTRAL_EVIDENCE)
+    assert hypothesis != "benign"
+
+@requires_operating_threshold
+def test_prediction_error_only_vote_below_threshold_is_still_benign() -> None:
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD / 10, "prediction_error", 10, 20, detector_votes=frozenset({"prediction_error"}))
+    hypothesis, _ = form_hypothesis(anomaly, _NEUTRAL_EVIDENCE)
+    assert hypothesis == "benign"
