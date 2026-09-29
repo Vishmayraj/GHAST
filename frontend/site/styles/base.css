@@ -48,6 +48,16 @@ a {
   color: inherit;
 }
 
+/* One word or short phrase inside a headline, or a literary
+   passage, set in the accent serif italic. Used sparingly — never
+   for a full heading, never for ordinary body copy. */
+.accent {
+  font-family: var(--font-accent);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

@@ -1,42 +1,46 @@
 /*
  * Design tokens for the GHAST site.
  *
- * Palette is deliberately restricted to five colors: ocean blue
- * (dominant), deep navy (structural/dark sections), white, black,
- * and a single red reserved exclusively for anomalies/spoofing —
- * never used decoratively. Neutrals for text/borders are blends of
- * navy and white only, so nothing outside the five hues appears.
+ * Exactly two colors: white, and one dark shade of blue, used at
+ * different depths (tints toward white, shades toward navy) for
+ * structure and text. There is no third hue anywhere, including for
+ * alerts — a flagged anomaly is distinguished by weight, contrast,
+ * and an outline, not by a different color.
+ *
+ * Type is two families: Instrument Sans carries everything (body,
+ * UI, headings), and Instrument Serif italic is reserved for one
+ * word or a short literary passage, used sparingly, never for body
+ * text. A system monospace stack (no webfont) handles small numeric
+ * readouts like MMSI and timestamps, which is a practical exception,
+ * not a third brand typeface.
  */
 
 :root {
-  /* The five colors */
-  --c-ocean: #0096c7;
-  --c-navy: #061b2a;
-  --c-red: #ff5c5c;
+  /* The two colors */
+  --c-blue: #1f4e79;
+  --c-navy: #0a2036;
   --c-white: #ffffff;
-  --c-black: #000000;
+  --c-black: #0a0a0a;
 
-  /* Ocean tints/shades (blends of ocean with white/navy only) */
-  --ocean-100: #dbf0f8;
-  --ocean-200: #b3e2f2;
-  --ocean-300: #7fcdea;
-  --ocean-400: #40b3dc;
-  --ocean-600: #0079a3;
-  --ocean-700: #045e80;
+  /* Blue tints/shades — blends of blue with white/navy only */
+  --ocean-100: #e4eaef;
+  --ocean-200: #c0cdd9;
+  --ocean-300: #8fa6bc;
+  --ocean-400: #5e809f;
+  --ocean-600: #194165;
+  --ocean-700: #143354;
 
-  /* Red tints/shades — blends of red with white/navy only, used
-     exclusively for anomaly/alert UI, never decoratively */
-  --red-100: #ffe1e1;
-  --red-700: #c23a3a;
+  /* Alias so the accent reads by its role, not the old hue name */
+  --c-ocean: var(--c-blue);
 
   /* Neutrals: navy blended toward white, nothing else */
   --ink-900: var(--c-navy);
-  --ink-700: #24394a;
-  --ink-500: #4c6274;
-  --ink-300: #8fa1ae;
-  --ink-100: #d9e2e7;
+  --ink-700: #28394a;
+  --ink-500: #52657a;
+  --ink-300: #94a3b3;
+  --ink-100: #dde3e9;
   --paper: var(--c-white);
-  --paper-dim: #f2f6f8;
+  --paper-dim: #f3f5f7;
 
   /* Semantic roles */
   --color-bg: var(--paper);
@@ -46,16 +50,20 @@
   --color-text-muted: var(--ink-500);
   --color-text-on-navy: var(--paper);
   --color-text-on-navy-muted: var(--ocean-200);
-  --color-accent: var(--c-ocean);
-  --color-anomaly: var(--c-red);
-  --color-border: rgba(6, 27, 42, 0.12);
+  --color-accent: var(--c-blue);
+  /* A flagged anomaly is the darkest point of the one blue, not a
+     different hue — contrast and weight carry the alert. */
+  --color-anomaly: var(--c-navy);
+  --color-border: rgba(10, 32, 54, 0.12);
   --color-border-on-navy: rgba(255, 255, 255, 0.14);
-  --color-grid-line: rgba(0, 150, 199, 0.18);
+  --color-grid-line: rgba(31, 78, 121, 0.18);
 
-  /* Typography — Sora for display, Space Grotesk for body/UI */
-  --font-display: "Sora", "Space Grotesk", system-ui, sans-serif;
-  --font-sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Space Grotesk", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* Typography — Instrument Sans for everything, Instrument Serif
+     italic reserved for rare accent words and the literary interlude */
+  --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: var(--font-sans);
+  --font-accent: "Instrument Serif", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   --step-ticker: 0.6875rem;
   --step-body: 1rem;
