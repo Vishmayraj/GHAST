@@ -36,7 +36,7 @@
 
   <header class="page-hero">
     <div class="page-hero__inner">
-      <h1 class="page-hero__title">A trajectory, not a signature.</h1>
+      <h1 class="page-hero__title">Read the <span class="accent">wake</span>, not a watchlist.</h1>
       <p class="page-hero__lede">
         GHAST doesn't match against a list of known jamming signatures. It
         predicts where a vessel should physically be next, and treats a
@@ -51,10 +51,10 @@
     <section class="section" id="detection" data-reveal>
       <div class="section__inner">
         <p class="eyebrow">Next-state prediction</p>
-        <h2 class="section__title">Predicted position vs. reported position</h2>
+        <h2 class="section__title">What we expected, what showed up</h2>
         <p class="section__lede">
-          Given a vessel's recent track — position, speed over ground,
-          course, heading, rate of turn — a sequence model predicts its next
+          Given a vessel's recent track: position, speed over ground,
+          course, heading, rate of turn, a sequence model predicts its next
           plausible state. Reported positions normally track that
           prediction closely, bounded by the vessel's real physical limits.
           A deviation that exceeds those limits is the anomaly score.
@@ -85,14 +85,14 @@
     <section class="section" style="background: var(--paper-dim);" data-reveal>
       <div class="section__inner">
         <p class="eyebrow">Fleet-wide check</p>
-        <h2 class="section__title">One vessel, or a whole area?</h2>
+        <h2 class="section__title">One vessel <span class="accent">adrift</span>, or a whole area?</h2>
         <p class="section__lede">
           A flagged deviation on its own doesn't say why. A clustering pass
           across every vessel currently in the area does: if one vessel is
           affected while its neighbors track normally, that points to
           targeted spoofing. If many vessels in the same area flag at once,
-          that points to area jamming instead — a materially different
-          situation for an analyst to walk into.
+          that points to area jamming instead. That's a materially
+          different situation for an analyst to walk into.
         </p>
 
         <div class="fleet-compare">
@@ -113,11 +113,11 @@
     <section class="section" data-reveal>
       <div class="section__inner">
         <p class="eyebrow">Why this works without insurer data</p>
-        <h2 class="section__title">Three public data sources, no proprietary access required</h2>
+        <h2 class="section__title">Public data, nothing borrowed</h2>
         <div class="data-cards">
           <div class="card data-card">
             <div class="data-card__title">Live public AIS feeds</div>
-            <div class="data-card__body">Real, continuously updating vessel tracks from public terrestrial and satellite AIS sources — no vessel or insurer relationship needed to reach a working system.</div>
+            <div class="data-card__body">Real, continuously updating vessel tracks from public terrestrial and satellite AIS sources, no vessel or insurer relationship needed to reach a working system.</div>
           </div>
           <div class="card data-card">
             <div class="data-card__title">Public research datasets</div>

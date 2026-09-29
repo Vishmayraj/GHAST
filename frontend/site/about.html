@@ -46,18 +46,18 @@
       <div class="section__inner section__inner--narrow">
         <p style="font-size: var(--step-lede); line-height: var(--lh-loose); color: var(--ink-700);">
           A lot of maritime spoofing and jamming tools work the way an
-          antivirus scanner works: they keep a list — known jamming zones,
-          known bad actors, known patterns — and raise an alert when
+          antivirus scanner works: they keep a list, known jamming zones,
+          known bad actors, known patterns, and raise an alert when
           something on the list shows up. That works right up until
           something doesn't match the list. A new jamming source outside a
           mapped zone, a spoofing technique nobody's cataloged yet, a
-          vessel behaving strangely for a reason no one's seen before —
-          none of that trips a signature check.
+          vessel behaving strangely for a reason no one's seen before.
+          None of that trips a signature check.
         </p>
         <p style="margin-top: var(--space-6); font-size: var(--step-lede); line-height: var(--lh-loose); color: var(--ink-700);">
           GHAST starts from a different question. Given everything a vessel
-          has just told the world about itself — its speed, its course, how
-          fast it can physically turn — where should it be next? When the
+          has just told the world about itself, its speed, course, and how
+          fast it can physically turn, where should it be next? When the
           position it actually reports drifts too far from that answer, the
           list it's on stops mattering. The deviation is the evidence,
           whether or not anyone has seen this particular flavor of spoofing
@@ -84,7 +84,7 @@
           </div>
           <div class="card data-card">
             <div class="data-card__title">Confidence gates escalation, not alarm volume</div>
-            <div class="data-card__body">Low-confidence or novel patterns go to a human analyst with partial evidence instead of getting auto-declared. False-positive rate — the metric that actually erodes an insurer's trust — is treated as a first-class number from Stage 1 onward, not an afterthought.</div>
+            <div class="data-card__body">Low-confidence or novel patterns go to a human analyst with partial evidence instead of getting auto-declared. False-positive rate, the metric that actually erodes an insurer's trust, is treated as a first-class number from Stage 1 onward, not an afterthought.</div>
           </div>
         </div>
       </div>
@@ -93,18 +93,25 @@
     <section class="section" data-reveal>
       <div class="section__inner section__inner--narrow">
         <p class="eyebrow">Where this is now</p>
-        <h2 class="section__title">An academic project, built like a real one</h2>
+        <h2 class="section__title">A <span class="accent">course</span> plotted like a real one</h2>
         <p class="section__lede">
           GHAST is currently Stage 1 of a three-semester build at GTU-SET: a
           live AIS ingestion pipeline, a Bi-LSTM trajectory model benchmarked
           against published baselines and tracked in MLflow, and a
           rule-assisted investigation agent with three working tools. The
-          site around it is honest about that — the diagrams and reports
+          site around it is honest about that. The diagrams and reports
           you've seen are illustrative, not a live feed, and they'll stop
           being illustrative in the order the
           <a href="https://github.com/Vishmayraj/GHAST/blob/main/docs/HLD/HLD_and_Master_Implementation_Plan.md" target="_blank" rel="noopener" style="color:var(--ocean-600); text-decoration:underline;">implementation plan</a>
           lays out.
         </p>
+        <p class="section__lede" style="margin-top: var(--space-6);">
+          It's being built by one engineering student, in the open, across
+          Semesters 5 through 7, not a funded team running a go-to-market
+          plan. The GitHub repo is the actual state of the project at any
+          given time, not a highlight reel of it.
+        </p>
+
       </div>
     </section>
 
