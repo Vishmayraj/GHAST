@@ -69,6 +69,8 @@ services:
     build:
       context: ../..
       dockerfile: scoring/Dockerfile
+      args:
+        WITH_LAYA: ${WITH_LAYA:-0}
     container_name: ghast-scoring
     restart: unless-stopped
     depends_on:
@@ -77,11 +79,14 @@ services:
     environment:
       POSTGRES_DSN: postgresql://${POSTGRES_USER:-ghast}:${POSTGRES_PASSWORD:-ghast}@timescaledb:5432/${POSTGRES_DB:-ghast}
       GHAST_CHECKPOINT: /checkpoints/epoch_010.pt
+      # Set to /laya_model (and build with WITH_LAYA=1) once a fine-tuned checkpoint exists.
+      GHAST_LAYA_MODEL: ${GHAST_LAYA_MODEL:-}
       GROQ_API_KEY: ${GROQ_API_KEY:-}
       GHAST_REPORT_MODEL: ${GHAST_REPORT_MODEL:-openai/gpt-oss-120b}
     volumes:
       # *.pt is gitignored; train or copy the checkpoint into ml/checkpoints first.
       - ../../ml/checkpoints:/checkpoints:ro
+      - ../../ml/laya_model:/laya_model:ro
 
   frontend:
     build:

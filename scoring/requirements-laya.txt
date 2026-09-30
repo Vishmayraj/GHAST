@@ -1,0 +1,3 @@
+# Optional: only installed when the image is built with WITH_LAYA=1. Pulls in transformers
+# and friends on top of the CPU torch already in the image, which is why it is opt-in.
+laya

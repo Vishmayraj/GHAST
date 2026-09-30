@@ -202,3 +202,15 @@ async def test_short_history_vessel_is_skipped() -> None:
 
     assert summary.short_history == 1 and summary.windows_scored == 0
     assert recorder.anomalies == []
+
+
+@pytest.mark.asyncio
+async def test_build_tools_registers_pattern_classifier_as_neutral_stub_by_default() -> None:
+    from live_scorer import build_tools
+
+    tools = build_tools(db=None)  # the stub never touches the database
+
+    assert set(tools) == {"track_history", "jamming_zones", "incident_history", "pattern_classifier"}
+    from orchestrator.state_machine import FlaggedAnomaly
+    result = await tools["pattern_classifier"](FlaggedAnomaly(1, NOW, 0.1, "x", 0.0, 0.0))
+    assert result["available"] is False

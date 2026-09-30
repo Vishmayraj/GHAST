@@ -78,6 +78,7 @@ from orchestrator.state_machine import (  # noqa: E402
 from report_generator.report import draft_report  # noqa: E402
 from tools.incident_history import find_similar_incidents  # noqa: E402
 from tools.jamming_zones import check_jamming_zones  # noqa: E402
+from tools.pattern_classifier import Predict, build_pattern_classifier, load_laya_predictor  # noqa: E402
 from tools.track_history import get_track_history  # noqa: E402
 
 logger = logging.getLogger("ghast.scoring")
@@ -396,8 +397,13 @@ class LiveScorer:
             await asyncio.sleep(self._config.poll_interval_seconds)
 
 
-def build_tools(db: Any) -> dict[str, Tool]:
-    """The existing agent tools, bound to a database handle. No new tool logic here."""
+def build_tools(db: Any, pattern_predict: Predict | None = None) -> dict[str, Tool]:
+    """The existing agent tools, bound to a database handle. No new tool logic here.
+
+    `pattern_classifier` is always registered so every persisted incident records whether the
+    Laya vote was available; with `pattern_predict=None` it is the neutral stub and changes
+    nothing about the investigation (agent/tools/pattern_classifier.py).
+    """
 
     async def track_history(anomaly: FlaggedAnomaly) -> dict[str, Any]:
         return await get_track_history(db, anomaly.mmsi, anomaly.flagged_at)
@@ -408,7 +414,12 @@ def build_tools(db: Any) -> dict[str, Tool]:
     async def incident_history(anomaly: FlaggedAnomaly) -> dict[str, Any]:
         return await find_similar_incidents(db, anomaly.mmsi, anomaly.anomaly_type)
 
-    return {"track_history": track_history, "jamming_zones": jamming_zones, "incident_history": incident_history}
+    return {
+        "track_history": track_history,
+        "jamming_zones": jamming_zones,
+        "incident_history": incident_history,
+        "pattern_classifier": build_pattern_classifier(track_history, pattern_predict),
+    }
 
 
 def build_persist(db: Any) -> Persist:
@@ -477,9 +488,19 @@ async def _serve(args: argparse.Namespace) -> int:
         initial_lookback_minutes=args.initial_lookback_minutes,
         poll_interval_seconds=args.poll_interval_seconds,
     )
+    pattern_predict: Predict | None = None
+    if args.laya_model:
+        try:
+            pattern_predict = load_laya_predictor(args.laya_model, args.device)
+            logger.info("loaded Laya pattern classifier from %s", args.laya_model)
+        except Exception:  # ImportError if laya is not installed, or a bad checkpoint path
+            logger.exception("Laya model %s could not be loaded: continuing with the neutral pattern_classifier stub", args.laya_model)
+    else:
+        logger.warning("GHAST_LAYA_MODEL not set: pattern_classifier runs as a neutral stub")
+
     pool = await asyncpg.create_pool(args.dsn, min_size=1, max_size=3)
     try:
-        scorer = LiveScorer(PostgresStore(pool), score_errors, build_tools(pool), build_persist(pool), report, config)
+        scorer = LiveScorer(PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), report, config)
         if args.once:
             print(f"cycle: {await scorer.poll_once()}")
             return 0
@@ -500,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--speed-jump-threshold", type=float, default=None, help="Off unless set; no swept value is on record yet.")
     parser.add_argument("--max-investigations-per-cycle", type=int, default=DEFAULT_MAX_INVESTIGATIONS_PER_CYCLE)
     parser.add_argument("--initial-lookback-minutes", type=float, default=DEFAULT_INITIAL_LOOKBACK_MINUTES, help="How far back the first cycle looks for new reports.")
+    parser.add_argument("--laya-model", default=os.environ.get("GHAST_LAYA_MODEL"), help="Path to a fine-tuned Laya checkpoint directory. Defaults to $GHAST_LAYA_MODEL; unset means a neutral stub.")
     parser.add_argument("--device", choices=("cpu", "cuda"), help="Defaults to cpu.")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit.")
     args = parser.parse_args(argv)
