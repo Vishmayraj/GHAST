@@ -17,3 +17,4 @@ infra/docker/.env
 *.pt
 ml/mlruns/
 mlruns/
+*.safetensors

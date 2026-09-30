@@ -1,0 +1,94 @@
+{
+  "dataset": "GHAST data/laya (holdout.jsonl)",
+  "model": "Laya fine-tuned (Kaggle 2xT4)",
+  "n_cases": 1500,
+  "chance_accuracy": 0.2,
+  "metrics": {
+    "accuracy": 0.8293,
+    "soft_accuracy": 0.7839,
+    "brier_score": 0.2141,
+    "ece": 0.0157,
+    "kl_divergence": 0.3764,
+    "total_variation": 0.2161,
+    "latency_p50_ms": 36.4,
+    "latency_p95_ms": 39.5,
+    "normal_track_false_positive_rate": 0.2933,
+    "spoof_miss_rate": 0.0983
+  },
+  "per_class_accuracy": {
+    "normal_track": 0.7067,
+    "teleport_jump": 1.0,
+    "gradual_drift": 0.9967,
+    "freeze_replay": 0.7067,
+    "impossible_kinematics": 0.7367
+  },
+  "confusion_matrix": {
+    "normal_track": {
+      "normal_track": 212,
+      "teleport_jump": 0,
+      "gradual_drift": 0,
+      "freeze_replay": 68,
+      "impossible_kinematics": 50
+    },
+    "teleport_jump": {
+      "normal_track": 1,
+      "teleport_jump": 300,
+      "gradual_drift": 0,
+      "freeze_replay": 1,
+      "impossible_kinematics": 1
+    },
+    "gradual_drift": {
+      "normal_track": 3,
+      "teleport_jump": 0,
+      "gradual_drift": 299,
+      "freeze_replay": 1,
+      "impossible_kinematics": 1
+    },
+    "freeze_replay": {
+      "normal_track": 57,
+      "teleport_jump": 0,
+      "gradual_drift": 0,
+      "freeze_replay": 212,
+      "impossible_kinematics": 27
+    },
+    "impossible_kinematics": {
+      "normal_track": 27,
+      "teleport_jump": 0,
+      "gradual_drift": 1,
+      "freeze_replay": 18,
+      "impossible_kinematics": 221
+    }
+  },
+  "accuracy_by_confidence": [
+    {
+      "min_confidence": 0.5,
+      "coverage": 0.807,
+      "accuracy": 0.917
+    },
+    {
+      "min_confidence": 0.6,
+      "coverage": 0.722,
+      "accuracy": 0.958
+    },
+    {
+      "min_confidence": 0.7,
+      "coverage": 0.688,
+      "accuracy": 0.972
+    },
+    {
+      "min_confidence": 0.8,
+      "coverage": 0.659,
+      "accuracy": 0.985
+    },
+    {
+      "min_confidence": 0.9,
+      "coverage": 0.628,
+      "accuracy": 0.993
+    },
+    {
+      "min_confidence": 0.95,
+      "coverage": 0.615,
+      "accuracy": 0.995
+    }
+  ]
+}
