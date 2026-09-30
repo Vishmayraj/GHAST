@@ -24,6 +24,7 @@ This brings up:
 - **TimescaleDB** (Postgres + PostGIS + TimescaleDB) on `localhost:5432` - where vessel tracks and incidents live.
 - **MinIO** (S3-compatible object storage) on `localhost:9000` (API) / `localhost:9001` (console) - where the raw AIS archive lives.
 - **ingestion** - connects to AIS Stream, normalizes messages, and writes them into TimescaleDB, archiving the raw envelopes to MinIO alongside.
+- **scoring** - polls live positions, scores them with the BiLSTM plus the rule detectors, and hands flags to the investigation agent. Needs `ml/checkpoints/epoch_010.pt` on the host (gitignored). `GROQ_API_KEY` is optional; without it incidents are stored without a drafted report.
 
 Check it's actually receiving data with `docker compose logs -f ingestion`, or query TimescaleDB directly:
 

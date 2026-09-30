@@ -2,7 +2,8 @@
 #
 # Brings up TimescaleDB (Postgres + PostGIS + TimescaleDB, for spatio-temporal
 # vessel-track storage), MinIO (S3-compatible object storage, for the raw AIS
-# archive), and the ingestion service (AIS Stream -> normalize -> TimescaleDB).
+# archive), the ingestion service (AIS Stream -> normalize -> TimescaleDB), and the
+# scoring service (live BiLSTM + detector scoring -> agent -> incidents).
 # Remaining application services (ml training, backend, frontend) get their
 # own service blocks added here as each one lands - see infra/docker/README.md.
 #
@@ -63,6 +64,24 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ghast}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ghast12345}
       MINIO_RAW_BUCKET: ${MINIO_RAW_BUCKET:-ghast-raw-ais}
+
+  scoring:
+    build:
+      context: ../..
+      dockerfile: scoring/Dockerfile
+    container_name: ghast-scoring
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - ingestion
+    environment:
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-ghast}:${POSTGRES_PASSWORD:-ghast}@timescaledb:5432/${POSTGRES_DB:-ghast}
+      GHAST_CHECKPOINT: /checkpoints/epoch_010.pt
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GHAST_REPORT_MODEL: ${GHAST_REPORT_MODEL:-openai/gpt-oss-120b}
+    volumes:
+      # *.pt is gitignored; train or copy the checkpoint into ml/checkpoints first.
+      - ../../ml/checkpoints:/checkpoints:ro
 
   frontend:
     build:

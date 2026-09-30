@@ -125,6 +125,12 @@ openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to select a Groq model an
 GHAST_REPORT_MAX_TOKENS to change the 2000-token default. Without a key,
 incidents persist without report_text.
 
+## Scoring as a container
+
+The compose stack has a `scoring` service (scoring/Dockerfile, CPU-only torch). It mounts
+ml/checkpoints read-only at /checkpoints, so copy epoch_010.pt there first (*.pt is
+gitignored). It runs with --min-votes 2 by default; edit the Dockerfile CMD to change that.
+
 ## Tests and current status
 
 CPU-fast checks do not need PostgreSQL, CUDA, MLflow, or LLM credentials:
@@ -143,6 +149,6 @@ bounded agent logic, incident schema, and live scorer polling-to-incident path.
 Implemented but requiring infrastructure: live scoring, checkpoint loading, and
 incident persistence. Experimental: threshold calibration, freeze/replay
 corroboration, and the single-vote confidence policy. Not implemented: a running
-backend API despite its README scaffold, dashboard, scoring Docker service, and
+backend API despite its README scaffold, dashboard, and
 automated database migrations. External live operation needs the AIS feed,
 database, checkpoint, and (for reports) Groq key.
