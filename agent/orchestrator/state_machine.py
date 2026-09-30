@@ -6,6 +6,7 @@ from enum import Enum
 import json
 from typing import Any
 
+from features.summary import NORMAL_LABEL
 from models.bilstm.threshold import OPERATING_THRESHOLD
 from tools.freeze_corroboration import corroborate_freeze_replay
 
@@ -18,6 +19,15 @@ REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate
 # that it fully solves the followup run's 19.4% control false-positive rate. A proper
 # fix (per-vessel-class or per-region threshold normalization) remains future work.
 SINGLE_DETECTOR_CONFIDENCE_CAP = 0.5
+
+# BigPass plan section 6: the Laya pattern classifier (tools/pattern_classifier.py) is a
+# fourth evidence source. Its vote only counts above this confidence, and it can only do two
+# things: agree (lifting the single-detector cap, exactly like a second detector would) or
+# contradict with a confident "normal_track" (applying the same cap). It never chooses the
+# hypothesis and never forces "benign": it has not been evaluated on this project's data yet,
+# and Laya's own docs list negation and label-wording weaknesses. Uncalibrated placeholder,
+# to be revisited once the checkpoint has a holdout evaluation (ml/evaluation/laya_export.py).
+PATTERN_MIN_CONFIDENCE = 0.7
 
 class InvestigationState(str, Enum):
     RECEIVED = "received"; GATHERING_EVIDENCE = "gathering_evidence"; HYPOTHESIZING = "hypothesizing"; REPORTING = "reporting"; ESCALATING = "escalating"; DONE = "done"
@@ -56,7 +66,18 @@ async def persist_incident(connection: Any, row: dict[str, Any]) -> None:
         json.dumps(row["tool_call_log"], default=str), row.get("report_text"),
     )
 
-def _apply_single_detector_cap(anomaly: FlaggedAnomaly, hypothesis: str, confidence: float) -> tuple[str, float]:
+def _pattern_vote(evidence: dict[str, Any]) -> str | None:
+    """"agrees" / "contradicts" / None (unavailable, low confidence, or not evidence at all)."""
+    result = evidence.get("pattern_classifier") or {}
+    confidence = result.get("confidence")
+    if not result.get("available") or confidence is None or confidence < PATTERN_MIN_CONFIDENCE:
+        return None
+    return "contradicts" if result.get("pattern") == NORMAL_LABEL else "agrees"
+
+def _apply_single_detector_cap(
+    anomaly: FlaggedAnomaly, hypothesis: str, confidence: float,
+    evidence: dict[str, Any] | None = None, ignore_contradiction: bool = False,
+) -> tuple[str, float]:
     """Down-weight confidence when exactly one detector produced this flag.
 
     Only acts when `detector_votes` is explicitly populated with exactly one entry -
@@ -65,8 +86,18 @@ def _apply_single_detector_cap(anomaly: FlaggedAnomaly, hypothesis: str, confide
     already a strong, independent signal in its own right, not one of the three score
     detectors this is meant to corroborate against), nor "benign"/"unresolved" (neither
     is a report-confidence tier this cap is meant to gate).
+
+    The Laya pattern classifier (see PATTERN_MIN_CONFIDENCE) acts as one more vote: a
+    confident non-normal pattern lifts the cap, a confident "normal_track" applies it even
+    when several detectors voted. `ignore_contradiction` is for the sequence-corroborated
+    freeze/replay tier, whose evidence is deterministic and read straight off the track.
     """
-    if len(anomaly.detector_votes) == 1 and hypothesis not in ("jamming", "benign", "unresolved"):
+    if hypothesis in ("jamming", "benign", "unresolved"):
+        return hypothesis, confidence
+    vote = _pattern_vote(evidence or {})
+    if vote == "contradicts" and not ignore_contradiction:
+        return hypothesis, min(confidence, SINGLE_DETECTOR_CONFIDENCE_CAP)
+    if len(anomaly.detector_votes) == 1 and vote != "agrees":
         return hypothesis, min(confidence, SINGLE_DETECTOR_CONFIDENCE_CAP)
     return hypothesis, confidence
 
@@ -101,16 +132,25 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
         # a frozen/replayed position visible directly in track_history) earns a
         # higher, auto-reporting confidence than the single-signal tiers below,
         # though still short of jamming's stronger direct zone match above.
-        return _apply_single_detector_cap(anomaly, "freeze_replay", 0.8)
+        return _apply_single_detector_cap(anomaly, "freeze_replay", 0.8, evidence, ignore_contradiction=True)
     if not evidence["incident_history"].get("similar_incidents"):
-        return _apply_single_detector_cap(anomaly, "targeted_spoof", 0.72)
-    return _apply_single_detector_cap(anomaly, "equipment_fault", 0.55)
+        return _apply_single_detector_cap(anomaly, "targeted_spoof", 0.72, evidence)
+    return _apply_single_detector_cap(anomaly, "equipment_fault", 0.55, evidence)
 
 async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: Persist, report: Report | None = None) -> InvestigationResult:
     """Gather all evidence before branching, then persist either report or escalation."""
     log: list[dict[str, Any]] = []; evidence: dict[str, Any] = {}
     for name in ("track_history", "jamming_zones", "incident_history"):
         result = await tools[name](anomaly); evidence[name] = result; log.append({"tool": name, "result": result})
+    # Optional fourth source (tools/pattern_classifier.py). Isolated from the three above:
+    # any failure becomes an "unavailable" result so a missing or broken Laya model can never
+    # stop an investigation, and callers that pass no such tool behave exactly as before.
+    if "pattern_classifier" in tools:
+        try:
+            result = await tools["pattern_classifier"](anomaly)
+        except Exception as error:  # noqa: BLE001
+            result = {"available": False, "pattern": None, "confidence": None, "probabilities": None, "reason": f"tool error: {type(error).__name__}"}
+        evidence["pattern_classifier"] = result; log.append({"tool": "pattern_classifier", "result": result})
     # Derived, not a tool call: computed once here from track_history's own result
     # so it's logged in evidence (persisted, and available to the report drafter)
     # without inflating tool_call_log's count of actual evidence-gathering calls.

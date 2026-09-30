@@ -36,7 +36,7 @@ values are `reported`, `escalated`, or `resolved`.
 One or two sentences explaining what GHAST observed. Cite only supplied evidence.
 
 ## Evidence
-- detector corroboration
+- detector corroboration (and the pattern classifier's vote, only if it was available)
 - freeze/jamming/history findings
 - bounded track summary (count and endpoints only)
 
@@ -77,6 +77,7 @@ def _compact_report_input(incident: dict[str, Any]) -> dict[str, Any]:
         "incident_history": evidence.get("incident_history"),
         "freeze_corroboration": evidence.get("freeze_corroboration"),
         "detector_corroboration": evidence.get("detector_corroboration"),
+        "pattern_classifier": evidence.get("pattern_classifier"),
     }
     return {
         key: incident.get(key)
