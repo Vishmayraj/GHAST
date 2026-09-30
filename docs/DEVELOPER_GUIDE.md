@@ -1,5 +1,7 @@
 # GHAST developer recovery guide
 
+Newer, more detailed documents start at `docs/architecture.md`. Where this guide and those disagree, the newer ones were checked against the code.
+
 This is the current Stage 1 pipeline, based on the code in this checkout:
 
     MarineCadastre CSV / AIS Stream
@@ -122,7 +124,7 @@ Reports are the only LLM call. The scorer loads the repository-root ignored .env
 without overriding process environment values. If GROQ_API_KEY is present,
 live_scorer creates Groq AsyncGroq and report_generator/report.py uses
 openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to select a Groq model and
-GHAST_REPORT_MAX_TOKENS to change the 2000-token default. Without a key,
+GHAST_REPORT_MAX_TOKENS to change the 1200-token default. Without a key,
 incidents persist without report_text.
 
 ## Laya pattern classifier (optional)

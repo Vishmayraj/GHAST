@@ -4,7 +4,7 @@ The evaluation harness: precision/recall/F1 against labeled AIS spoofing data, s
 
 - `datasets.py` — `AISObservation` (the shared labeled-record shape) and dataset loaders. Currently one: `load_gps_spoofing_mass`, for the dataset in `data/research_datasets/gps_spoofing_mass/` (see that directory's README for what it is and how to fetch it).
 - `metrics.py` — precision/recall/F1/accuracy from a confusion matrix. Stdlib only.
-- `baselines.py` — two trivial detectors (`prediction_error_detector`, `speed_jump_detector`) used to prove the harness itself is correct before any real model exists. Not meant to be competitive.
+- `baselines.py` — three detectors: `prediction_error_detector`, `speed_jump_detector` and `freeze_replay_detector`. `score_checkpoint.py` sweeps all three; the live scorer uses the first and third (and the second if given a threshold).
 - `harness.py` — `evaluate()` runs a detector against a dataset and returns the metrics; also a CLI.
 
 ## Try it
@@ -25,4 +25,4 @@ cd ml
 python -m pytest evaluation/tests/ -v
 ```
 
-13 tests, all against a 25-row fixture sampled from the real dataset (`evaluation/tests/fixtures/`) - no network or full dataset download needed to run them.
+33 tests in this directory (the metrics, harness and dataset tests run against a 25-row fixture sampled from the real dataset (`evaluation/tests/fixtures/`); the rest use synthetic windows and a small untrained model) - no network, database or full dataset download needed to run them.

@@ -1,0 +1,97 @@
+# Tests
+
+Map of the test suite as it exists. Nothing was executed while writing this document. The counts below come from counting `def test_` definitions (there is no `parametrize` anywhere), so they are static counts, not pass counts. A `pytest` run may report a different number if collection changes them, and nothing here says the suite is green.
+
+## Counts and layout
+
+| Package | Test files | Tests | Run from |
+|---|---|---|---|
+| `ingestion/tests` | `test_normalize.py` | 8 | `ingestion/` |
+| `ml/features/tests` | `test_extract`, `test_inject`, `test_pipeline_streaming`, `test_summary` | 22 | `ml/` |
+| `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
+| `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
+| `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 33 | `ml/` |
+| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history` | 43 | `agent/` |
+| `scoring/tests` | `test_live_scorer.py` | 9 | `scoring/` |
+| total | 20 files | 123 | |
+
+The ML total is 63. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
+
+Each package has a `pytest.ini` with a `pythonpath` line so that bare `pytest` resolves the flat imports (`ml/pytest.ini`: `.`; `agent/pytest.ini`: `. ../ml`; `scoring/pytest.ini`: `. ../ml ../agent`). `ingestion/` has no `pytest.ini`; its tests import `normalizer.normalize` and work when run from `ingestion/`.
+
+```text
+cd ingestion && pytest tests -v
+cd ml        && pytest features/tests training/tests models/bilstm/tests evaluation/tests -v
+cd agent     && pytest tests -v
+cd scoring   && pytest tests -v
+```
+
+## What needs what
+
+None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq, or Laya. Database access is replaced by fake connections and fake stores, the BiLSTM is a small untrained model, and the Laya predictor is an injected function.
+
+| Suite | Third-party packages actually needed |
+|---|---|
+| `ingestion/tests` | `pytest` only (the normalizer imports nothing outside the stdlib). `requirements-dev.txt` also installs `websockets`, `asyncpg`, `minio`, which the tests do not import. |
+| `ml/*` | `torch`, `numpy`, `asyncpg` (imported by `features.pipeline`), `pytest`. `requirements-dev.txt` also brings `mlflow`, `scikit-learn`, `pandas`, `psycopg`, `tqdm`, `psutil`; only `psutil` is imported by code under test (inside `score_checkpoint.run`, which is not tested). |
+| `agent/tests` | `numpy`, `asyncpg`, `pytest`, `pytest-asyncio`. No torch: `state_machine` imports only `models.bilstm.threshold`, which is a constant. |
+| `scoring/tests` | same as agent. `live_scorer` imports torch only inside `load_model_scorer`, which is not called. |
+
+`ml/requirements.txt` says `torch>=2.2` with no index URL, so on Linux CI it pulls the default CUDA build. That works but is a large download for every ML workflow.
+
+## CI
+
+`.github/workflows/` has seven workflows, each installing the matching `requirements-dev.txt` on Python 3.12 and running one test directory:
+
+| Workflow | Runs | Triggers on changes to |
+|---|---|---|
+| `ingestion-tests` | `ingestion/tests` | `ingestion/**` |
+| `ml-features-tests` | `ml/features/tests` | `ml/features/**`, `ml/requirements*.txt` |
+| `ml-training-tests` | `ml/training/tests` | `ml/training/**`, `ml/features/**` |
+| `ml-model-tests` | `ml/models/bilstm/tests` | `ml/models/bilstm/**`, `ml/training/**`, `ml/features/**` |
+| `ml-evaluation-tests` | `ml/evaluation/tests` | `ml/evaluation/**`, `ml/features/**`, `ml/models/bilstm/**` |
+| `agent-tests` | `agent/tests` | `agent/**`, `ml/requirements*.txt` |
+| `scoring-tests` | `scoring/tests` | `scoring/**`, `agent/**`, `ml/features/**`, `ml/evaluation/**`, `ml/models/bilstm/threshold.py` |
+
+Gaps in the path filters, from the lists themselves: a change to `ml/features/**` does not run `agent-tests`, although `agent` imports `features.extract` and `features.summary`. A change to `ml/training/**` does not run `ml-evaluation-tests`, although `score_checkpoint` imports `training.dataset_cache`. `ml-model-tests` uses `ml/training/**`, so it covers that import for the model test only.
+
+## What is covered
+
+Ingestion: `normalize_envelope` and `parse_time_utc` (nanosecond truncation, missing fractions, bad format, both metadata casings, unsupported types, missing MMSI).
+
+ML features: implied speed with irregular time steps, mask columns, window sizing and minimum length; every injector's labels and reproducibility; streaming windows flushed at vessel boundaries, `max_vessels`, `max_windows`, `max_rows`, progress callback, against a fake connection; the summary text (determinism, teleport, freeze, replay, kinematics, stale feature column ignored, short tracks).
+
+ML training: vessel hash split (determinism, roughly 20%), shard writer and shard batch iterator shapes, live window policy (14 day and 15 day gates, rolling window).
+
+BiLSTM: `models/bilstm/tests/test_model.py` runs the small in-memory training loop for 10 epochs on one repeated synthetic window and asserts the loss goes down. This is the only test that trains anything.
+
+Evaluation: precision, recall, F1 and confusion counts; the harness on a 25-row fixture from the public dataset; the Laya exporter's core logic on synthetic windows (schema, label balance, quotas, thinning, the observability gate and its opt-out); `score_checkpoint` helpers (batched scoring equals single-window scoring, zero error on the first report, pattern carried through, threshold candidates, sweep, per-pattern breakdown, both extra detectors).
+
+Agent: `form_hypothesis` tiers, the exact boundary around `OPERATING_THRESHOLD`, single-detector cap, detector corroboration in evidence, freeze tiering and its backward compatibility, jamming priority, `investigate` audit trail and persistence, the Laya tool (stub, prediction passthrough, shared summary text, too little history, exceptions) and the vote rules, report input compaction and error handling, track history and jamming zone queries via fake connections.
+
+Scoring: a high error triggers `investigate`, a low error does not, a frozen position votes with zero error, `--min-votes 2`, open-incident debounce, no re-investigation on the next poll, per-cycle cap with deferral and retry, short-history skip, `build_tools` registering the classifier stub.
+
+## Requires external services or cannot run in a clean checkout
+
+By the code, not by trying:
+
+- Nothing in the test suite needs an external service.
+- Everything that is not a test does: ingestion needs an AISStream key and a database; training, evaluation, export and the scorer need a populated database; the scorer needs `ml/checkpoints/epoch_010.pt`; the Laya path needs the weights file. None of those files is in the repository.
+- The importer, `score_checkpoint.run/main`, `train.run_training/main`, `laya_export._export`, `live_scorer._serve` and `PostgresStore` are the largest pieces of real logic that no test executes.
+
+## Gaps that matter
+
+- No test runs SQL. The four large streaming queries (`POSITION_QUERY` and friends), `RECENT_REPORTS_QUERY`, `ACTIVE_VESSELS_QUERY`, `OPEN_INCIDENT_QUERY`, `JAMMING_ZONE_QUERY`, `TRACK_HISTORY_QUERY`, the incident insert, and `schema.sql` itself are exercised only through fakes that do not check the SQL. A typo would be found first against a real database.
+- `train_from_shards`, `_run_epoch` and `run_training` have no test. `materialize_to_shards` is not tested against a stream. The shard writer and batch iterator are.
+- `incident_history.find_similar_incidents` and `persist_incident` are not tested.
+- No test covers the collector's reconnect logic, `IngestionConfig`, `TimescaleWriter`, `RawArchiver`, or `ingestion/main.py` batching.
+- `load_laya_predictor` is never run against the real library, so a mismatch with Laya's API would show up only when the model is enabled.
+- `live_scorer`'s watermark and overlap logic is only exercised over one or two polls. Nothing tests a late-committed row landing inside the overlap.
+- There is no end-to-end test that runs flag, investigate, persist against a database. The single recorded live report (`ghast_latest_report.md`) is the only evidence of that path, and it is not a test.
+- No test measures detection quality. The offline F1 numbers come from `score_checkpoint.py` runs outside the suite.
+
+## Stale comments and docs
+
+- `agent/tests/test_state_machine.py` and `test_pattern_classifier.py` carry `skipif(OPERATING_THRESHOLD is None)` guards and comments saying the threshold is still `None`. It is 0.004946, so the guards never skip and the comments are out of date. `scoring/tests/test_live_scorer.py` has the same guard as a module-level `pytestmark`.
+- `ml/evaluation/README.md` says "13 tests"; there are 33 in that directory.
+- `ml/evaluation/README.md` describes two baseline detectors and one dataset loader; there are three detectors and a second loader.

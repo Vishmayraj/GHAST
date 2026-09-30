@@ -3,7 +3,7 @@
 The investigation layer: a bounded, tool-using agent that turns a flagged anomaly into an evidence-backed incident report. This is the "agentic" requirement from the proposal — bounded, evidence-gathering security work, not open-ended chat.
 
 - `orchestrator/` — the state machine driving the agent workflow.
-- `tools/` — the three Stage 1 tools: track history, jamming-zone lookup, incident history.
+- `tools/` — track history, jamming-zone lookup, incident history, and the optional Laya `pattern_classifier`.
 - `report_generator/` — drafts the structured incident report.
 
 Design principles (carried over from the proposal, MIP section 4.2): the agent never auto-declares "this is spoofing" — it produces a scored hypothesis with evidence attached, escalation is confidence-driven rather than magnitude-driven, and every tool call is logged so reports stay auditable.
@@ -30,7 +30,7 @@ docker compose exec timescaledb psql -U ghast -d ghast -c "SELECT id, mmsi, flag
 ```
 
 An acceptable real run has either `status = 'escalated'` or a non-empty
-`report_text`, and exactly the three evidence tool calls in `audit_entries`.
+`report_text`, and three evidence tool calls in `audit_entries` (four when the `pattern_classifier` tool is registered, as `scoring/live_scorer.py` always does).
 Never put the Groq credential in source control; inject `GROQ_API_KEY` only through
 the runtime environment used by the report-drafting caller. The default report model
 is `openai/gpt-oss-120b`; set `GHAST_REPORT_MODEL` to override it.

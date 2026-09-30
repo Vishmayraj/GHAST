@@ -16,7 +16,7 @@ docker compose up -d
 ```
 
 The first run builds MinIO from source (a few minutes, see
-`infra/docker/minio/Dockerfile` for why) - it's not pulled as a
+`infra/docker/Dockerfile` for why) - it's not pulled as a
 pre-built image, since minio/minio is no longer available on Docker
 Hub or quay.io. After the first build it's cached like any image.
 
@@ -36,7 +36,7 @@ Stop everything with `docker compose down` (add `-v` to also drop the volumes an
 
 ## As a contributor (adding a new service)
 
-`ml/`, `backend/`, and `frontend/` are still empty layers being filled in per `ImplementationPlans/Sem5IP.md`. As each one gets its first real code, add it here the same way `ingestion` was added:
+`ml/` and `frontend/` now have code that is not in compose (ML training runs on the host; the site is served by the `frontend` service), and `backend/` has only the schema. As a new service gets its first real code, add it here the same way `ingestion` was added:
 
 1. Add a `Dockerfile` next to the service's code (e.g. `backend/Dockerfile`).
 2. Add a matching service block to `docker-compose.yml`, using `timescaledb` / `minio` as `depends_on` where relevant.
