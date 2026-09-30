@@ -1,0 +1,4 @@
+# Tests never load torch, a checkpoint, a database, or an LLM: the model scorer, the
+# store, and investigate() are all injected fakes. asyncpg and numpy are imported
+# transitively (features.pipeline, tools.freeze_corroboration).
+-r ../agent/requirements-dev.txt
