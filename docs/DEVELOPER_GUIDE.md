@@ -125,6 +125,12 @@ openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to select a Groq model an
 GHAST_REPORT_MAX_TOKENS to change the 2000-token default. Without a key,
 incidents persist without report_text.
 
+## Laya pattern classifier (optional)
+
+agent/tools/pattern_classifier.py is a fourth evidence source. Without a fine-tuned model it
+is a neutral stub and nothing changes. See docs/laya_pattern_classifier.md to export data,
+fine-tune, evaluate, and switch it on.
+
 ## Scoring as a container
 
 The compose stack has a `scoring` service (scoring/Dockerfile, CPU-only torch). It mounts
@@ -136,6 +142,8 @@ gitignored). It runs with --min-votes 2 by default; edit the Dockerfile CMD to c
 CPU-fast checks do not need PostgreSQL, CUDA, MLflow, or LLM credentials:
 
     cd C:\Projects\GHAST\agent
+    python -m pytest tests -v
+    cd C:\Projects\GHAST\scoring
     python -m pytest tests -v
     cd C:\Projects\GHAST\ml
     python -m pytest features\tests training\tests models\bilstm\tests evaluation\tests -v

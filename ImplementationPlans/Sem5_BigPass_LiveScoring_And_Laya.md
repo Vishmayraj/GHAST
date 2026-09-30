@@ -196,3 +196,25 @@ chicken-and-egg problem needed.
 
 Backend API and dashboard wiring remain the next document after this one, once section 7 is fully
 checked.
+
+---
+
+## Status update (2026-09-30)
+
+Checked against the code, not against memory:
+
+- [x] Section 1: `OPERATING_THRESHOLD = 0.004946`, provenance filled in (precision and recall
+      were not recorded in the handoff; pull from the MLflow run if wanted).
+- [x] Section 2: `form_hypothesis` uses `OPERATING_THRESHOLD`; boundary tests exist.
+- [x] Section 3: `freeze_replay_detector` added and swept; detector votes recorded in evidence.
+- [x] Section 4: `scoring/live_scorer.py`, debounce, per-cycle cap, CLI. Added in this pass:
+      `scoring/tests/` (9 tests, fakes only), `scoring-tests.yml` CI workflow, `scoring` compose
+      service with a CPU-only Dockerfile.
+- [x] Section 5: report model comes from `GHAST_REPORT_MODEL` (default is now a Groq model).
+- [~] Section 6 (Laya): code done and tested with fakes: shared summary
+      (`ml/features/summary.py`), balanced export (`ml/evaluation/laya_export.py`),
+      `agent/tools/pattern_classifier.py`, wiring in `investigate` and `form_hypothesis`, optional
+      `WITH_LAYA` image. NOT done: running the export, fine-tuning, and a holdout evaluation.
+      Until then the tool is a neutral stub. Steps are in `docs/laya_pattern_classifier.md`.
+- [ ] Section 7 final bullet: a live end-to-end run on real data and its written verdict.
+- Fixed along the way: two async agent tests were missing `@pytest.mark.asyncio` and failed in CI.
