@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
-from evaluation.laya_export import Quota, assign_case, collect_rows, make_row
+from evaluation.laya_export import Quota, assign_case, collect_rows, inject, injection_is_observable, make_row
 from features.extract import COG_INDEX, N_FEATURES, SOG_INDEX
 from features.pipeline import FeatureWindow
 from features.summary import NORMAL_LABEL, PATTERN_LABELS
@@ -68,3 +68,46 @@ def test_thinning_drops_windows() -> None:
     windows = [window(m) for m in range(1, 300)]
     rows = collect_rows(windows, Quota(10**6, 10**6), seed=0, sample_permille=100, is_holdout_vessel=lambda m: False)
     assert 5 < len(rows) < 80
+
+
+def stationary_window(mmsi: int, day: int = 0) -> FeatureWindow:
+    """A moored vessel: no speed, positions that only jitter, and a COG that is pure noise."""
+    rng = np.random.default_rng(mmsi * 31 + day)
+    features = np.zeros((20, N_FEATURES), dtype=np.float32)
+    features[:, COG_INDEX] = rng.uniform(0, 360, 20)
+    positions = np.round(np.array([(51.0 + rng.normal(0, 2e-6), 4.0 + rng.normal(0, 2e-6)) for _ in range(20)]), 5)
+    stamps = tuple(START + timedelta(days=day, minutes=i) for i in range(20))
+    return FeatureWindow(mmsi, stamps[0], stamps[-1], features, positions, stamps)
+
+
+def test_freeze_and_impossible_are_unobservable_on_a_stationary_vessel() -> None:
+    for label in ("freeze_replay", "impossible_kinematics"):
+        for seed in range(20):
+            clean = stationary_window(1, seed)
+            assert not injection_is_observable(label, clean, inject(clean, label, 0.75, seed)), (label, seed)
+
+
+def test_freeze_and_impossible_are_observable_on_an_underway_vessel() -> None:
+    for label in ("freeze_replay", "impossible_kinematics"):
+        for seed in range(20):
+            clean = window(1, seed)
+            assert injection_is_observable(label, clean, inject(clean, label, 0.5, seed)), (label, seed)
+
+
+def test_teleport_and_drift_are_always_observable() -> None:
+    clean = stationary_window(1)
+    for label in ("teleport_jump", "gradual_drift", NORMAL_LABEL):
+        assert injection_is_observable(label, clean, inject(clean, label, 0.25, 3))
+
+
+def test_gate_skips_and_counts_unobservable_rows_and_can_be_disabled() -> None:
+    windows = [stationary_window(m, d) for m in range(1, 60) for d in range(4)]
+    quota = Quota(per_class_train=10**6, per_class_holdout=10**6)
+    rows = collect_rows(windows, quota, seed=0, sample_permille=1000, is_holdout_vessel=lambda m: False)
+    labels = {json.loads(r["gold"])["pattern"]["label"] for r in rows}
+    assert labels == {NORMAL_LABEL, "teleport_jump", "gradual_drift"}
+    assert quota.skipped_unobservable["freeze_replay"] > 0 and quota.skipped_unobservable["impossible_kinematics"] > 0
+
+    ungated = collect_rows(windows, Quota(10**6, 10**6), seed=0, sample_permille=1000,
+                           is_holdout_vessel=lambda m: False, observability_gate=False)
+    assert {json.loads(r["gold"])["pattern"]["label"] for r in ungated} == set(PATTERN_LABELS)

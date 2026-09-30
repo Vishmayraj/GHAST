@@ -31,6 +31,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
+from features.extract import COG_INDEX, MISSING_VALUE, haversine_kilometres, implied_speed_knots
 from features.inject import INJECTORS
 from features.summary import (
     NORMAL_LABEL, PATTERN_LABELS, QUESTION_ID, label_for_pattern, pattern_questions,
@@ -38,6 +41,15 @@ from features.summary import (
 )
 
 SEVERITIES = (0.25, 0.5, 0.75)
+
+# Observability gate. Two injectors are no-ops on a vessel that is not moving: freeze_replay
+# copies earlier positions forward (identical to the jitter already there), and
+# impossible_kinematics flips one COG value (COG is noise at rest, so nothing stands out).
+# Labelling those rows as spoofs teaches the model to guess, and it is why ~60% of stationary
+# holdout windows were misclassified. Rows whose injection cannot be seen in the summary are
+# skipped, not relabelled, and counted in the manifest.
+MIN_FREEZE_DISPLACEMENT_KM = 0.05   # a replay must move some report at least this far (50 m)
+MIN_UNDERWAY_KNOTS = 1.0            # same 1 kn rule summary.py uses before trusting course vs travel
 DEFAULT_PER_CLASS_TRAIN = 1500
 DEFAULT_PER_CLASS_HOLDOUT = 300
 DEFAULT_SAMPLE_PERMILLE = 50
@@ -61,12 +73,44 @@ def keep_window(window: Any, seed: int, sample_permille: int) -> bool:
     return _hash_int("keep", window.mmsi, window.window_start.isoformat(), seed=seed) % 1000 < sample_permille
 
 
-def make_row(window: Any, label: str, severity: float, injector_seed: int, split: str) -> dict[str, Any]:
-    """One Laya training row from a clean window plus the label to inject into it."""
+def inject(window: Any, label: str, severity: float, injector_seed: int) -> Any:
+    """The window with `label` injected (the window itself for the clean control class)."""
     if label == NORMAL_LABEL:
-        altered = window
-    else:
-        altered, _ = INJECTORS[label](window, severity, injector_seed)
+        return window
+    altered, _ = INJECTORS[label](window, severity, injector_seed)
+    return altered
+
+
+def injection_is_observable(label: str, clean: Any, altered: Any) -> bool:
+    """False when the injection leaves nothing a summary of the altered window could show.
+
+    teleport_jump and gradual_drift move positions by kilometres, so they always show.
+    """
+    if label == "freeze_replay":
+        shift = max(
+            haversine_kilometres(a[0], a[1], b[0], b[1])
+            for a, b in zip(clean.positions, altered.positions)
+        )
+        return shift >= MIN_FREEZE_DISPLACEMENT_KM
+    if label == "impossible_kinematics":
+        changed = np.flatnonzero(clean.features[:, COG_INDEX] != altered.features[:, COG_INDEX])
+        if len(changed) == 0 or clean.features[changed[0], COG_INDEX] == MISSING_VALUE:
+            return False
+        index = int(changed[0])
+        if index == 0:
+            return False
+        speed = implied_speed_knots(
+            {"received_at": clean.timestamps[index - 1], "latitude": clean.positions[index - 1][0], "longitude": clean.positions[index - 1][1]},
+            {"received_at": clean.timestamps[index], "latitude": clean.positions[index][0], "longitude": clean.positions[index][1]},
+        )
+        return speed > MIN_UNDERWAY_KNOTS
+    return True
+
+
+def make_row(window: Any, label: str, severity: float, injector_seed: int, split: str, altered: Any | None = None) -> dict[str, Any]:
+    """One Laya training row from a clean window plus the label to inject into it."""
+    if altered is None:
+        altered = inject(window, label, severity, injector_seed)
     gold = {QUESTION_ID: {
         "label": label,
         "probabilities": {key: 1.0 if key == label else 0.0 for key in PATTERN_LABELS},
@@ -89,6 +133,7 @@ class Quota:
     def __init__(self, per_class_train: int, per_class_holdout: int) -> None:
         self._caps = {"train": per_class_train, "holdout": per_class_holdout}
         self.counts: dict[str, Counter[str]] = {"train": Counter(), "holdout": Counter()}
+        self.skipped_unobservable: Counter[str] = Counter()
 
     def wants(self, split: str, label: str) -> bool:
         return self.counts[split][label] < self._caps[split]
@@ -101,7 +146,10 @@ class Quota:
         return all(self.counts[s][label] >= cap for s, cap in self._caps.items() for label in PATTERN_LABELS)
 
 
-def collect_rows(windows: Iterable[Any], quota: Quota, seed: int, sample_permille: int, is_holdout_vessel) -> list[dict[str, Any]]:
+def collect_rows(
+    windows: Iterable[Any], quota: Quota, seed: int, sample_permille: int, is_holdout_vessel,
+    observability_gate: bool = True,
+) -> list[dict[str, Any]]:
     """Synchronous core: turn clean windows into quota-limited rows. Pure, so it is unit-tested."""
     rows: list[dict[str, Any]] = []
     for window in windows:
@@ -113,7 +161,11 @@ def collect_rows(windows: Iterable[Any], quota: Quota, seed: int, sample_permill
         split = "holdout" if is_holdout_vessel(window.mmsi) else "train"
         if not quota.wants(split, label):
             continue
-        rows.append(make_row(window, label, severity, injector_seed, split))
+        altered = inject(window, label, severity, injector_seed)
+        if observability_gate and not injection_is_observable(label, window, altered):
+            quota.skipped_unobservable[label] += 1
+            continue
+        rows.append(make_row(window, label, severity, injector_seed, split, altered=altered))
         quota.add(split, label)
     return rows
 
@@ -150,6 +202,11 @@ async def _export(args: argparse.Namespace) -> int:
         "sample_permille": args.sample_permille, "labels": list(PATTERN_LABELS),
         "counts": {s: dict(quota.counts[s]) for s in quota.counts},
         "quota_met": quota.done,
+        "observability_gate": None if args.keep_unobservable else {
+            "min_freeze_displacement_km": MIN_FREEZE_DISPLACEMENT_KM,
+            "min_underway_knots": MIN_UNDERWAY_KNOTS,
+            "skipped_unobservable": dict(quota.skipped_unobservable),
+        },
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps(manifest, indent=2))
@@ -162,7 +219,8 @@ def _drain(
     windows: list[Any], quota: Quota, args: argparse.Namespace, is_validation_vessel,
     rows_by_split: dict[str, list[dict[str, Any]]],
 ) -> None:
-    for row in collect_rows(windows, quota, args.seed, args.sample_permille, is_validation_vessel):
+    for row in collect_rows(windows, quota, args.seed, args.sample_permille, is_validation_vessel,
+                            observability_gate=not args.keep_unobservable):
         rows_by_split[row["split"]].append(row)
 
 
@@ -178,6 +236,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sample-permille", type=int, default=DEFAULT_SAMPLE_PERMILLE, help="Keep this many windows per 1000 before class assignment.")
     parser.add_argument("--max-windows", type=int, help="Development cap on windows read from the database.")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--keep-unobservable", action="store_true",
+                        help="Disable the observability gate (old behaviour): keep freeze_replay / impossible_kinematics rows "
+                             "even when the injection is invisible in the summary, e.g. on stationary vessels.")
     args = parser.parse_args(argv)
     return asyncio.run(_export(args))
 

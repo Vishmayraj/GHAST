@@ -22,6 +22,17 @@ construction (default 1500 per class for train, 300 per class for holdout). Spli
 vessel with the same rule the BiLSTM used, so holdout vessels were never seen in training.
 If the manifest says `quota_met: false`, widen the date range or raise `--sample-permille`.
 
+Observability gate (on by default). `freeze_replay` and `impossible_kinematics` are no-ops on a
+vessel that is not moving: the replay copies positions that are already jitter, and a COG flip
+disappears into COG noise at rest. Rows where the injection cannot be seen in the summary are
+skipped and counted in `manifest.json` under `observability_gate.skipped_unobservable`. The
+model therefore learns "looks stationary means normal_track" and will not flag a spoof of those
+two kinds on a moored vessel; the summary cannot show one. Stationary windows need many more
+windows read to fill the quota, so expect to raise `--sample-permille` or widen the dates.
+Holdout accuracy from a gated export is not comparable to the first run's 0.829, because the
+unwinnable rows are gone. Compare per-class accuracy and the normal_track false-positive rate.
+`--keep-unobservable` restores the old behaviour.
+
 Each row has `state`, `questions`, `gold` as JSON strings, the schema Laya's own notebook
 reads. The text in `state` comes from `ml/features/summary.py`, the same function the live
 tool uses, so training and serving match.
