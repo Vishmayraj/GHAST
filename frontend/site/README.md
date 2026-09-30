@@ -27,7 +27,7 @@ site/
     ghast-hero.mp4 / .webm  # the cinematic hero video
   styles/
     tokens.css           # 5-color palette (ocean/navy/red/white/black),
-                          # Sora + Space Grotesk type scale
+                          # Instrument Sans + Instrument Serif type scale
     base.css             # reset, layout primitives, page-header pattern
     nav.css               # shared fixed top nav (all pages)
     hero.css              # pinned/scroll-scrubbed cinematic hero (index only)
