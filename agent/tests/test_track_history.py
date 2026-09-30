@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timezone
 
 from tools.track_history import TRACK_HISTORY_QUERY, get_track_history
@@ -12,6 +13,7 @@ class _FakeConnection:
         return [{"received_at": args[1], "latitude": 1.0, "longitude": 2.0}]
 
 
+@pytest.mark.asyncio
 async def test_track_history_uses_timestamp_typed_interval_expression() -> None:
     connection = _FakeConnection()
     flagged_at = datetime(2026, 9, 29, tzinfo=timezone.utc)

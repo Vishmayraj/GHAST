@@ -1,3 +1,4 @@
+import pytest
 from datetime import datetime, timezone
 
 from tools.jamming_zones import JAMMING_ZONE_QUERY, check_jamming_zones
@@ -13,6 +14,7 @@ class _FakeConnection:
         return self.row
 
 
+@pytest.mark.asyncio
 async def test_jamming_zone_query_casts_geography_to_geometry() -> None:
     connection = _FakeConnection({"name": "test zone", "confidence": 0.9})
     flagged_at = datetime(2026, 9, 29, tzinfo=timezone.utc)
