@@ -1,0 +1,31 @@
+{
+  "source": "historical",
+  "start": "2026-04-01",
+  "end": "2026-04-15",
+  "seed": 0,
+  "sample_permille": 50,
+  "labels": [
+    "normal_track",
+    "teleport_jump",
+    "gradual_drift",
+    "freeze_replay",
+    "impossible_kinematics"
+  ],
+  "counts": {
+    "train": {
+      "freeze_replay": 1500,
+      "normal_track": 1500,
+      "impossible_kinematics": 1500,
+      "teleport_jump": 1500,
+      "gradual_drift": 1500
+    },
+    "holdout": {
+      "normal_track": 300,
+      "teleport_jump": 300,
+      "impossible_kinematics": 300,
+      "freeze_replay": 300,
+      "gradual_drift": 300
+    }
+  },
+  "quota_met": true
+}
