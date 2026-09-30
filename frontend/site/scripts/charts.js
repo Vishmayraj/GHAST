@@ -48,9 +48,36 @@ window.GHAST_CHARTS = {
     container.innerHTML =
       '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="' +
       (options.ariaLabel || "Deviation over time") + '">' +
-        '<polygon points="' + areaPoints + '" fill="var(--ocean-100)" opacity="0.6"></polygon>' +
-        '<polyline points="' + points + '" fill="none" stroke="var(--ocean-600)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></polyline>' +
+        '<polygon points="' + areaPoints + '" fill="var(--ocean-100)" opacity="0.6" class="chart-area"></polygon>' +
+        '<polyline points="' + points + '" fill="none" stroke="var(--ocean-600)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" class="chart-line"></polyline>' +
         thresholdMarker +
       '</svg>';
+
+    // Draw the line in rather than snapping it into place. Skipped
+    // entirely under reduced-motion, where the chart just appears
+    // fully drawn.
+    var reduceMotion = window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduceMotion) return;
+
+    var line = container.querySelector(".chart-line");
+    var area = container.querySelector(".chart-area");
+    if (!line || typeof line.getTotalLength !== "function") return;
+
+    var length = line.getTotalLength();
+    line.style.strokeDasharray = length;
+    line.style.strokeDashoffset = length;
+    if (area) area.style.opacity = "0";
+
+    // Force layout so the browser registers the start state before
+    // the transition to the end state is applied.
+    line.getBoundingClientRect();
+
+    line.style.transition = "stroke-dashoffset 900ms var(--ease-out)";
+    line.style.strokeDashoffset = "0";
+    if (area) {
+      area.style.transition = "opacity 600ms var(--ease-out) 500ms";
+      area.style.opacity = "0.6";
+    }
   }
 };

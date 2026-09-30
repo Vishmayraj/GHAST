@@ -29,14 +29,15 @@
   function renderFleetMap(mount, example) {
     if (!mount) return;
     var w = 320, h = 240;
-    var dots = example.vessels.map(function (v) {
+    var dots = example.vessels.map(function (v, i) {
       var cx = v.x * w, cy = v.y * h;
       var fill = v.flagged ? "var(--color-anomaly)" : "var(--ocean-400)";
       var r = v.flagged ? 7 : 5;
+      var delay = 'style="animation-delay:' + (i * 55) + 'ms"';
       var ring = v.flagged
-        ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r + 5) + '" fill="none" stroke="var(--color-anomaly)" stroke-width="1.5" opacity="0.45" />'
+        ? '<circle cx="' + cx + '" cy="' + cy + '" r="' + (r + 5) + '" fill="none" stroke="var(--color-anomaly)" stroke-width="1.5" opacity="0.45" ' + delay + ' />'
         : "";
-      return ring + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" />';
+      return ring + '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '" ' + delay + ' />';
     }).join("");
 
     mount.querySelector(".fleet-map__svg").innerHTML =
@@ -81,12 +82,23 @@
       '</div>' +
       '<div class="incident-card__confidence">' +
         '<div class="incident-card__meta">Agent confidence &mdash; ' + pct(inc.confidence) + '</div>' +
-        '<div class="confidence-bar"><div class="confidence-bar__fill" style="width:' + pct(inc.confidence) + '"></div></div>' +
+        '<div class="confidence-bar"><div class="confidence-bar__fill" id="confidence-fill"></div></div>' +
       '</div>' +
       '<ul class="incident-card__evidence">' +
         inc.evidence.map(function (e) { return "<li>" + e + "</li>"; }).join("") +
       '</ul>' +
       '<p class="incident-card__note">Illustrative report — generated here from mock data, not a live detection.</p>';
+
+    // Fill the bar in on the next frame rather than at its final
+    // width, so it reads as the agent arriving at a number.
+    var fill = cardMount.querySelector("#confidence-fill");
+    if (fill) {
+      window.requestAnimationFrame(function () {
+        window.requestAnimationFrame(function () {
+          fill.style.width = pct(inc.confidence);
+        });
+      });
+    }
   }
 
   // ---- dashboard preview: incident feed ----
