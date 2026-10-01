@@ -106,6 +106,20 @@ CREATE INDEX IF NOT EXISTS incidents_status_idx
 CREATE INDEX IF NOT EXISTS incidents_position_idx
     ON incidents USING GIST (flagged_position);
 
+-- Analyst review (agent/review.py). status = 'resolved' keeps meaning "has a verdict":
+-- recording a verdict sets it, which also lifts the live scorer's debounce for that vessel.
+-- review_verdict is the analyst's call on what the incident really was; hypothesis stays
+-- the agent's own guess so scoring/review_stats.py can compare the two.
+-- ADD COLUMN IF NOT EXISTS keeps this safe to re-apply on every ingestion startup.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS review_verdict TEXT
+    CHECK (review_verdict IN ('confirmed_spoof', 'jamming', 'equipment_fault', 'benign', 'unclear'));
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS review_notes TEXT;
+
+CREATE INDEX IF NOT EXISTS incidents_unreviewed_idx
+    ON incidents (flagged_at DESC) WHERE review_verdict IS NULL;
+
 -- Known jamming/spoofing zones. Stage 1: manually curated
 -- (data/jamming_zones/), queried by agent/tools/jamming_zones.py to check
 -- a flagged position/time against a known zone (MIP section 4.1). Stage 2
