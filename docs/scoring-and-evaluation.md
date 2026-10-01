@@ -133,7 +133,43 @@ The scorer is not multi-threaded across vessels: it issues one query per active 
 
 ### Tests
 
-`scoring/tests/test_live_scorer.py`: 9 tests with fake store, fake scorer and fake `investigate`. High error triggers, low does not, freeze votes on zero error, `--min-votes 2` needs agreement, open incident debounce, no re-investigation on the next poll, cap then retry, short history skipped, tool registration. Not tested: `PostgresStore` queries, `load_model_scorer`, `_serve`, real checkpoint loading, Groq, Laya loading, the watermark and overlap logic across multiple cycles beyond what those tests touch.
+`scoring/tests/test_live_scorer.py`: 10 tests with fake store, fake scorer and fake `investigate`. High error triggers, low does not, a flag carries the scored window's first and last report times, freeze votes on zero error, `--min-votes 2` needs agreement, open incident debounce, no re-investigation on the next poll, cap then retry, short history skipped, tool registration. Not tested: `PostgresStore` queries, `load_model_scorer`, `_serve`, real checkpoint loading, Groq, Laya loading, the watermark and overlap logic across multiple cycles beyond what those tests touch.
+
+## Review statistics
+
+`scoring/review_stats.py` turns analyst verdicts (recorded with `agent/review.py`, `docs/agent.md`) into precision numbers. It only reads incidents with a `review_verdict`; it creates and changes nothing.
+
+```text
+cd scoring
+python review_stats.py --dsn postgresql://ghast:ghast@localhost:5432/ghast
+```
+
+Two definitions, both kept as constants at the top of the file so they can be argued with:
+
+- Hypothesis precision: the share of decided reviews where the verdict is one the agent's hypothesis claims (`HYPOTHESIS_CONFIRMED_BY`: `jamming` by `jamming`; `targeted_spoof` and `freeze_replay` by `confirmed_spoof`; `equipment_fault` by `equipment_fault`; `benign` by `benign`). `unresolved` is never a hit.
+- Vote-combination precision: the share of decided reviews where the flag was a real event at all (`REAL_EVENT_VERDICTS`: `confirmed_spoof`, `jamming`, `equipment_fault`), grouped by the incident's `anomaly_type`, which is the sorted detector votes joined with `+`. `equipment_fault` counts as real because the detectors did catch a genuine anomaly.
+- `unclear` verdicts are counted but left out of every denominator.
+
+Output shape (example with made-up numbers, only to show the layout):
+
+```text
+reviewed incidents: 12 (unclear: 2, excluded from precision)
+too few to trust: fewer than 30 reviewed incidents, treat these as anecdotes
+
+precision per hypothesis (agent hypothesis matches the analyst verdict)
+hypothesis      reviewed  unclear  correct  precision
+freeze_replay          4        0        3       0.75 *
+targeted_spoof         8        2        2       0.33 *
+
+precision per detector votes (flag was a real event: confirmed_spoof, jamming or equipment_fault)
+votes                          reviewed  unclear  correct  precision
+freeze_replay+prediction_error        4        0        3       0.75 *
+prediction_error                      8        2        3       0.50 *
+
+* fewer than 30 reviewed in this row
+```
+
+With no reviewed incidents it prints `no reviewed incidents`. Under 30 reviewed in total it adds the "too few to trust" line; any single row under 30 carries a `*`. The 30 is a starting value, not a calibrated one. `scoring/tests/test_review_stats.py` has 9 tests with a fake connection.
 
 ## Status
 
@@ -143,6 +179,7 @@ The scorer is not multi-threaded across vessels: it issues one query per active 
 | threshold `OPERATING_THRESHOLD` | placeholder from the removed synthetic evaluation; re-derive by flag rate from real traffic |
 | `freeze_replay_detector` evaluation | experimental; only its live vote rate is measurable, on real traffic |
 | live-data evaluation | not done |
+| review statistics (`review_stats.py`) | implemented, unit tested with fakes; prints `no reviewed incidents` until analysts record verdicts |
 | `live_scorer.py` | implemented, tested with fakes; a live run producing a persisted incident is recorded in `ghast_latest_report.md` (see `docs/agent.md`) |
 | threshold calibration for live | not done |
 | per-vessel-class or per-region thresholds | proposed in code comments, not implemented |

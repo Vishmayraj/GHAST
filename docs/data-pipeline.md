@@ -31,7 +31,7 @@ Downstream code separates the two with a predicate on `message_type`:
 
 - `message_type IS DISTINCT FROM 'historical'` means live. Used by `ml/features/pipeline.py` (`POSITION_QUERY`, `COUNT_QUERY`, `LIVE_COVERAGE_QUERY`) and `scoring/live_scorer.py` (`ACTIVE_VESSELS_QUERY`, `RECENT_REPORTS_QUERY`).
 - `message_type = 'historical'` means historical. Used by `HISTORICAL_POSITION_QUERY` and `HISTORICAL_COUNT_QUERY` in `ml/features/pipeline.py`.
-- The agent tools do not filter. `agent/tools/track_history.py` reads all rows for an MMSI in a 48 hour span around the flagged time regardless of source, and `agent/tools/incident_history.py` never touches `vessel_position`.
+- The agent tools do not filter. `agent/tools/track_history.py` reads all rows for an MMSI in the 24 hours up to the flagged time regardless of source (reports after the flag only when a caller asks for them), and `agent/tools/incident_history.py` never touches `vessel_position`.
 
 Consequence of the "live is anything that is not historical" rule: a future third source would be treated as live unless it also sets `message_type = 'historical'`.
 
@@ -148,16 +148,18 @@ One row per investigation, written by `agent/orchestrator/state_machine.py::pers
 | `id` | UUID PK | `gen_random_uuid()` |
 | `mmsi` | BIGINT NOT NULL | |
 | `flagged_at` | TIMESTAMPTZ NOT NULL | timestamp of the flagged report |
-| `window_start`, `window_end` | TIMESTAMPTZ | never written by any code |
+| `window_start`, `window_end` | TIMESTAMPTZ | first and last report time of the scored window, written by `persist_incident`; NULL on rows stored before this was added |
 | `flagged_position` | GEOGRAPHY(POINT, 4326) | |
 | `anomaly_score` | DOUBLE PRECISION NOT NULL | the BiLSTM prediction error at the flagged report |
 | `anomaly_type` | TEXT | the sorted detector votes joined with `+`, e.g. `freeze_replay+prediction_error` |
 | `hypothesis` | TEXT NOT NULL | CHECK in `jamming, targeted_spoof, freeze_replay, equipment_fault, benign, unresolved` |
 | `confidence` | DOUBLE PRECISION | |
-| `status` | TEXT NOT NULL | CHECK in `reported, escalated, resolved`; code only ever writes the first two |
+| `status` | TEXT NOT NULL | CHECK in `reported, escalated, resolved`; the agent writes the first two, `agent/review.py` sets `resolved` when it records a verdict |
 | `evidence`, `tool_call_log` | JSONB | full tool outputs and the ordered call log |
 | `report_text` | TEXT | NULL unless the Groq report succeeded |
-| `created_at`, `updated_at` | TIMESTAMPTZ | `updated_at` has no trigger |
+| `review_verdict` | TEXT | analyst verdict, CHECK in `confirmed_spoof, jamming, equipment_fault, benign, unclear`; NULL until reviewed |
+| `reviewed_by`, `reviewed_at`, `review_notes` | TEXT, TIMESTAMPTZ, TEXT | set with the verdict by `agent/review.py` |
+| `created_at`, `updated_at` | TIMESTAMPTZ | `updated_at` has no trigger; the review CLI sets it when it records a verdict |
 
 Indexes: `(mmsi, flagged_at DESC)`, `status`, GiST on `flagged_position`.
 

@@ -10,6 +10,7 @@ Entry point: `agent.orchestrator.state_machine.investigate()`. Its caller is `sc
 |---|---|---|
 | detector votes, score, flag | yes (BiLSTM inference plus thresholds, in the scorer) | BiLSTM weights |
 | `track_history`, `jamming_zones`, `incident_history` | yes, SQL against PostgreSQL | none |
+| review verdict (`agent/review.py`) | no, a human | analyst |
 | `pattern_classifier` | code is deterministic | Laya model, optional |
 | freeze corroboration | yes | none |
 | hypothesis and confidence | yes, `form_hypothesis` | none |
@@ -26,11 +27,11 @@ FlaggedAnomaly (mmsi, flagged_at, score, anomaly_type, lat, lon, detector_votes)
   2. jamming_zones        -> evidence["jamming_zones"]
   3. incident_history     -> evidence["incident_history"]
   4. pattern_classifier   -> evidence["pattern_classifier"]   (only if the tool is registered)
-  5. freeze corroboration -> evidence["freeze_corroboration"] (computed from step 1, not a tool call)
+  5. freeze corroboration -> evidence["freeze_corroboration"] (computed from the last 20 reports of step 1, not a tool call)
   6. detector votes       -> evidence["detector_corroboration"]
   7. form_hypothesis(anomaly, evidence) -> (hypothesis, confidence)
-  8. confidence >= 0.7 ? status "reported" (+ optional LLM report) : status "escalated"
-  9. persist one incidents row
+  8. confidence >= 0.7 ? status "reported" (+ optional LLM report, never for benign) : status "escalated"
+  9. persist one incidents row (including window_start and window_end from the scored window)
 ```
 
 Each of steps 1 to 4 is appended to `tool_call_log` with its full result. Step 4 is wrapped in a try/except: an exception becomes `{"available": False, ...}`. Steps 1 to 3 are not wrapped, so an exception from a database tool propagates out of `investigate`; the scorer catches it, counts the vessel as `failed`, and moves on without persisting anything for that flag.
@@ -45,16 +46,16 @@ All take the `FlaggedAnomaly` and return a dict. In production they are closures
 
 | Tool | Query | Result |
 |---|---|---|
-| `track_history` | rows for the MMSI with `received_at` within 24 hours before and 24 hours after `flagged_at`, ordered by time, columns `received_at, latitude, longitude, sog_knots, cog_deg` | `{"positions": [...]}` |
+| `track_history` | rows for the MMSI with `received_at` within 24 hours before `flagged_at` and no later than `flagged_at`, ordered by time, columns `received_at, latitude, longitude, sog_knots, cog_deg`. A separate query for reports after the flag runs only when the caller passes `after_hours` | `{"positions": [...]}`, plus `"after": [...]` only when asked for |
 | `jamming_zones` | first active zone with `ST_Contains(zone, point)` whose `first_seen`/`last_seen` bracket `flagged_at` (nulls allowed) | `{"matched": bool, "zone": {name, confidence} or None}` |
-| `incident_history` | up to 10 `incidents` rows where `mmsi` matches OR `anomaly_type` matches, newest first | `{"similar_incidents": [...]}` |
+| `incident_history` | two queries, up to 10 rows each, newest first: incidents for the same `mmsi`, and incidents with the same `anomaly_type` on other vessels | `{"same_vessel": [...], "same_pattern_elsewhere": [...]}` |
 | `pattern_classifier` | in-process Laya call on the summary of the 20 reports ending at the flag | see `docs/laya_pattern_classifier.md` |
 
 Behavior worth knowing:
 
-- `track_history` reads all sources and looks forward as well as back. The positions it returns can include reports after `flagged_at`, so evidence and the LLM report's "last position" can describe times after the flag. In `ghast_latest_report.md` the flag is at 19:41:47 and the last position is at 19:45:10.
-- The freeze corroboration runs on that whole 48 hour span, not on the 20-report window the detectors scored. The same report shows 23 pairs for 24 positions over about 6 hours.
-- `incident_history` matches on `anomaly_type` alone across all vessels. `anomaly_type` is the sorted vote names joined with `+` (`prediction_error`, `freeze_replay+prediction_error`, ...). After the first incident of a given type is stored, every later flag of that type, on any vessel, finds a non-empty history. See the tier table below for what that does. It also includes incidents of any status and any age.
+- `track_history` reads all sources but only up to and including `flagged_at`, so evidence and the LLM report's "last position" cannot describe times after the flag. `positions` is the recent trajectory (24 hours back by default). The scorer does not ask for the `after` slice, so nothing currently reads it.
+- Freeze corroboration runs on the last 20 reports of `positions`, the same window length the detectors scored. Because `positions` ends at the flagged report, this window ends at the flag, while the scored window ends at the newest report in it; the two can differ by the reports after the flag inside the scored window.
+- `incident_history` keeps "this vessel has been here before" (`same_vessel`, matches `mmsi`) apart from "this pattern has been seen elsewhere" (`same_pattern_elsewhere`, matches `anomaly_type` on other vessels). `anomaly_type` is the sorted vote names joined with `+` (`prediction_error`, `freeze_replay+prediction_error`, ...). Both include incidents of any status and any age. Only `same_vessel` feeds a hypothesis rule; `same_pattern_elsewhere` is recorded in evidence for the analyst and the report.
 - `jamming_zones` has no data source in the repo, so on a database where nobody inserted zones, `matched` is always false.
 
 ## Hypothesis rules (`form_hypothesis`)
@@ -66,11 +67,24 @@ Evaluated top to bottom, first match returns. `OPERATING_THRESHOLD` is 0.004946 
 | 1 | jamming zone matched | `jamming` | 0.85 | never |
 | 2 | `OPERATING_THRESHOLD is None` | `unresolved` | 0.0 | no |
 | 3 | score below threshold and no detector other than `prediction_error` voted | `benign` | 0.75 | never |
-| 4 | freeze corroboration matched | `freeze_replay` | 0.8 | yes, but ignores a Laya contradiction |
-| 5 | no similar incidents | `targeted_spoof` | 0.72 | yes |
+| 4 | freeze corroboration matched (at least `MIN_FROZEN_PAIRS` frozen pairs in the last 20 reports) | `freeze_replay` | 0.8 | yes, but ignores a Laya contradiction |
+| 4b | weak isolated flag: `detector_votes` is exactly `{prediction_error}`, score at most `BENIGN_MAX_SCORE_MULTIPLE` times the threshold, stationary window, no confident Laya label for a spoofing pattern | `benign` | 0.75 | never |
+| 5 | no earlier incident on this vessel (`same_vessel` empty) | `targeted_spoof` | 0.72 | yes |
 | 6 | otherwise | `equipment_fault` | 0.55 | yes |
 
 Cap logic (`_apply_single_detector_cap`): if exactly one detector voted (`len(detector_votes) == 1`), confidence is capped at 0.5 unless Laya confidently agrees. A confident Laya `normal_track` caps at 0.5 regardless of the vote count (except in row 4). An empty `detector_votes` (callers that do not track it) is never treated as a single vote.
+
+Laya "agrees" only when its confident label is the one the hypothesis implies, from the one dict `HYPOTHESIS_IMPLIED_PATTERNS` in `state_machine.py`:
+
+| Hypothesis | Labels that agree |
+|---|---|
+| `freeze_replay` | `freeze_replay` |
+| `targeted_spoof` | `teleport_jump`, `gradual_drift`, `impossible_kinematics` |
+| `equipment_fault` | none (Laya has no label for it) |
+
+A confident label for a different pattern is neither agreement nor contradiction and changes nothing.
+
+"Stationary window" (row 4b) means at least `STATIONARY_MIN_SOG_READINGS` (10) reported SOG values among the last 20 reports with a median at or below `STATIONARY_MEDIAN_SOG_KNOTS` (0.5). `BENIGN_MAX_SCORE_MULTIPLE` is 2.0. All of these, and `MIN_FROZEN_PAIRS` (3), are uncalibrated starting values. A benign result is stored as `reported` (0.75 is over the 0.7 line) but no LLM report is drafted for it. The rule is a proposal pending owner sign-off.
 
 `REPORT_CONFIDENCE_THRESHOLD = 0.7` decides the outcome. Combined with the tier table:
 
@@ -78,23 +92,23 @@ Cap logic (`_apply_single_detector_cap`): if exactly one detector voted (`len(de
 - `equipment_fault` (0.55) is escalated always, and any capped result (0.5) is escalated.
 - The reported/escalated split therefore encodes "how many independent signals agreed and whether this vessel or flag type has been seen", not severity.
 
-Consequences of the rules as written, none of them fixed:
+Consequences of the rules as written:
 
-- Row 3 cannot be reached from the live scorer. A flag is only produced when at least one detector voted, and the `prediction_error` vote requires a score above the threshold, so a flag with a below-threshold score must carry a `freeze_replay` or `speed_jump` vote, which blocks row 3. `benign` occurs only in direct calls and tests. The scorer therefore never records a benign incident, only flags that pass some detector.
-- Row 5 versus 6 depends on `incident_history`, and because that tool matches `anomaly_type` across all vessels, `targeted_spoof` is only reachable for the first incident of each `anomaly_type` string. After that, flags of that type on other vessels resolve to `equipment_fault` and are escalated, unless freeze corroboration matched (row 4). Whether this is intended is not stated anywhere; the docstrings describe it as "check for similar past incidents".
+- Row 3 still cannot be reached from the live scorer. A flag is only produced when at least one detector voted, and the `prediction_error` vote requires a score above the threshold, so a flag with a below-threshold score must carry a `freeze_replay` or `speed_jump` vote, which blocks row 3. Row 4b is what makes `benign` reachable from a real flag: it needs a `prediction_error`-only vote barely over the threshold on a stationary window.
+- Row 5 versus 6 depends only on this vessel's own history. A first incident for a vessel is `targeted_spoof` whatever the fleet has seen. A second incident on the same vessel resolves to `equipment_fault` and is escalated, unless freeze corroboration matched (row 4). Whether "a vessel with earlier incidents is more likely faulty equipment" is the right reading is a judgement the reviewed incidents should test, not a measured fact.
 - Row 1 outranks everything, and a matched zone gives a report even for a flag with a single vote.
-- There is no rule that produces `resolved` status. Nothing in the repo sets it (`docs/data-pipeline.md`).
-- The confidences (0.85, 0.8, 0.72, 0.55, 0.75, cap 0.5) and the 0.7 report threshold are hand-set. `REPORT_CONFIDENCE_THRESHOLD` is marked in the code as an uncalibrated Stage 1 placeholder; nothing has calibrated the others against reviewed incidents.
+- `resolved` is set only by an analyst verdict through `agent/review.py`. No rule in the agent sets it.
+- The confidences (0.85, 0.8, 0.72, 0.55, 0.75, cap 0.5), the 0.7 report threshold, and the constants listed under the tier table are hand-set. `scoring/review_stats.py` is where they get checked against reviewed incidents; nothing has calibrated them yet.
 
 ## Freeze corroboration
 
-`agent/tools/freeze_corroboration.py::corroborate_freeze_replay(track_history)` walks consecutive rows. For each pair with a non-null `sog_knots` on the later row and a valid time step, it computes position-implied speed (`features.extract.implied_speed_knots`). A pair counts as frozen when implied speed is at most 0.5 knots and reported SOG is above 0.5. `matched` is true if at least one pair is frozen. Output: `{matched, frozen_reports, total_pairs}`.
+`agent/tools/freeze_corroboration.py::corroborate_freeze_replay(track_history)` takes the last `FREEZE_WINDOW_REPORTS` (20) positions and walks consecutive rows. For each pair with a non-null `sog_knots` on the later row and a valid time step, it computes position-implied speed (`features.extract.implied_speed_knots`). A pair counts as frozen when implied speed is at most 0.5 knots and reported SOG is above 0.5. `matched` is true when at least `MIN_FROZEN_PAIRS` (3) pairs are frozen. Output: `{matched, frozen_reports, total_pairs}`.
 
-One frozen pair anywhere in 48 hours is enough. In the report in `ghast_latest_report.md` the evidence was 2 frozen pairs out of 23. A vessel that anchors, moors, or reports a wrong SOG at rest gets the same signal. There is no minimum count or fraction.
+The minimum keeps one bad SOG at rest (a single frozen pair) from matching. 3 is uncalibrated; the code comment says so. The earlier committed report in `ghast_latest_report.md` had 2 frozen pairs out of 23 over a 48 hour span, which under these rules would not match.
 
 ## Report generation
 
-`agent/report_generator/report.py::draft_report(incident, client)` is called only for `reported` incidents, and only if the scorer built a Groq client (`GROQ_API_KEY` set). The scorer wraps it so any exception returns an empty string; the incident is stored with `report_text` NULL.
+`agent/report_generator/report.py::draft_report(incident, client)` is called only for `reported` incidents whose hypothesis is not `benign`, and only if the scorer built a Groq client (`GROQ_API_KEY` set). The scorer wraps it so any exception returns an empty string; the incident is stored with `report_text` NULL.
 
 - Client: `groq.AsyncGroq(max_retries=0)`. Model: `GHAST_REPORT_MODEL`, default `openai/gpt-oss-120b`. Output cap: `GHAST_REPORT_MAX_TOKENS`, default 1200. (`docs/DEVELOPER_GUIDE.md` says 2000; the code and `agent/report_generator/README.md` say 1200.)
 - The prompt is fixed text (`REPORT_PROMPT_PREFIX`) followed by compact JSON: the decision fields plus a summary of evidence (position count, first and last position of `track_history`, and the full zone, history, freeze, detector and classifier results). Full track history is deliberately left out.
@@ -103,11 +117,28 @@ One frozen pair anywhere in 48 hours is enough. In the report in `ghast_latest_r
 
 ## Persistence
 
-`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text`. Evidence and log are JSON with `default=str` for datetimes. `window_start`, `window_end` and `updated_at` are never set. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
+`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text, window_start, window_end`. Evidence and log are JSON with `default=str` for datetimes. `window_start` and `window_end` are the first and last report times of the scored window, carried on the `FlaggedAnomaly` by `scoring/live_scorer.py::evaluate_window`; they are NULL for callers that do not set them, and for incidents stored before this change. `updated_at` is left to its column default. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
+
+## Analyst review
+
+`agent/review.py` is a small CLI over incidents that already exist. It never creates one.
+
+```text
+cd agent
+python review.py list [--limit 25]
+python review.py show <incident-id>
+python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAME] [--force]
+```
+
+- `list`: incidents with `review_verdict IS NULL`, newest first, each with hypothesis, confidence, status, votes (`anomaly_type`), the scored window span, and whether a report is stored (with the `show` command to read it).
+- `show`: the stored evidence (the raw position list collapsed to its count and first and last rows; `tool_call_log` is left out because it repeats the evidence), the 20-report summary text the Laya classifier reads, rebuilt from the stored `track_history` with `features.summary.summarize_rows`, and the stored report. If fewer than 20 reports are stored up to the flag it says so instead of summarizing.
+- `verdict`: one of `confirmed_spoof`, `jamming`, `equipment_fault`, `benign`, `unclear`. It sets `review_verdict`, `reviewed_by` (defaults to the OS user), `reviewed_at`, `review_notes`, and `status = 'resolved'`. An existing verdict is not replaced unless `--force` is given.
+
+`status = 'resolved'` means "has a verdict". The live scorer's debounce query only skips vessels with a non-resolved incident, so recording a verdict lifts the database side of the debounce for that vessel. The scorer also keeps an in-memory per-vessel cooldown for the same `--debounce-hours`, which a verdict does not touch. Precision numbers come from `scoring/review_stats.py` (`docs/scoring-and-evaluation.md`).
 
 ## Tests
 
-`agent/tests` (43 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling and failure isolation, freeze corroboration, report input compaction and error handling, tool queries against fake connections. See `docs/testing.md` for the run and skip conditions. Not tested: real SQL against PostGIS, `find_similar_incidents`, `persist_incident` against a real table, Groq calls, and the `incident_history` cross-vessel behavior above.
+`agent/tests` (82 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling (including the hypothesis-to-label mapping) and failure isolation, freeze corroboration (minimum pairs, 20-report window), the weak-isolated-flag benign rule, window columns on the persisted row, report input compaction and error handling, tool queries against fake connections (`track_history` bounds and the opt-in `after` slice, the two `incident_history` queries), and the review CLI functions against a fake connection. See `docs/testing.md` for the run and skip conditions. Not covered by the committed tests: real SQL against PostGIS and TimescaleDB, and Groq calls. The new incidents SQL (schema columns, the history and review queries, `persist_incident` with window columns) and the new `track_history` queries were run by hand against a scratch PostgreSQL 16 with PostGIS and a plain `vessel_position` table, which is not TimescaleDB.
 
 ## Status
 
@@ -117,9 +148,9 @@ One frozen pair anywhere in 48 hours is enough. In the report in `ghast_latest_r
 | Groq report drafting | implemented, tested with a fake client; one real report is committed as `ghast_latest_report.md` |
 | Laya vote | implemented, tested with fakes; no fine-tuned model runs by default (`docs/laya_pattern_classifier.md`) |
 | confidence values and thresholds | hand-set, uncalibrated |
-| escalation workflow (a human acting on `escalated`) | not implemented, the status is only a column value |
-| `resolved` status | never set |
+| analyst review (`agent/review.py`, `scoring/review_stats.py`) | implemented, unit tested with fakes; no incident has been reviewed yet |
+| `resolved` status | set only by a recorded verdict |
 | dashboard or API reading incidents | not implemented (`docs/backend-and-frontend.md`) |
 | `jamming_zones` data | none |
 
-Documentation that is out of date relative to this code: `agent/README.md` (three tools; says a valid run has "exactly three" audit entries, it now has four when the classifier tool is registered), `agent/orchestrator/README.md` (four hypotheses, no `freeze_replay`; LangGraph), `agent/tools/README.md` (three tools).
+Documentation that is out of date relative to this code: `agent/README.md` (three tools; says a valid run has "exactly three" audit entries, it now has four when the classifier tool is registered), `agent/orchestrator/README.md` (LangGraph).

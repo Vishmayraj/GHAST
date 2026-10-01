@@ -127,16 +127,17 @@ What this does and does not tell you:
 Constants and logic are in `agent/orchestrator/state_machine.py`.
 
 - `PATTERN_MIN_CONFIDENCE = 0.7`. Uncalibrated placeholder. The benchmark above exists but the constant has not been reviewed against it, so treat 0.7 as still unset. The temperature values in `rl_agent_config.json` (1.6255, 1.2, 1.2) are Laya's own calibration for its three question types, not something GHAST tuned.
-- `_pattern_vote(evidence)` returns `"agrees"` if the tool was available, confidence is present and at least 0.7, and the label is anything other than `normal_track`; `"contradicts"` if it is `normal_track` at that confidence; otherwise `None` (unavailable, low confidence, or no tool).
+- `_pattern_vote(evidence, hypothesis)` returns `"contradicts"` if the tool was available at confidence of at least 0.7 and the label is `normal_track`; `"agrees"` if, at that confidence, the label is one the hypothesis implies (`HYPOTHESIS_IMPLIED_PATTERNS`: `freeze_replay` needs `freeze_replay`; `targeted_spoof` accepts `teleport_jump`, `gradual_drift` or `impossible_kinematics`; `equipment_fault` has no agreeing label); otherwise `None` (unavailable, low confidence, no tool, or a confident label for a different pattern).
 - The vote is used in exactly one place, `_apply_single_detector_cap`:
 
 | Situation | Effect |
 |---|---|
 | confident `normal_track`, hypothesis is not `jamming`, `benign`, `unresolved` | confidence capped at 0.5, even with several detector votes |
-| confident non-normal label and exactly one detector vote | cap not applied |
+| confident label that matches the hypothesis and exactly one detector vote | cap not applied |
+| confident non-normal label that does not match the hypothesis | unchanged (the cap still applies to a single vote) |
 | any other case | unchanged |
 
-- Exceptions: `jamming`, `benign` and `unresolved` are never touched. The sequence-corroborated `freeze_replay` tier ignores a `normal_track` contradiction (`ignore_contradiction=True`) but the single-detector cap still applies to it unless Laya agrees.
+- Exceptions: `jamming`, `benign` and `unresolved` are never touched. The sequence-corroborated `freeze_replay` tier ignores a `normal_track` contradiction (`ignore_contradiction=True`) but the single-detector cap still applies to it unless Laya agrees, which for this tier means a `freeze_replay` label.
 
 What it is not allowed to do, and does not: choose the hypothesis, produce `benign`, override a jamming zone match, raise a confidence, or affect a flag whose score is below the BiLSTM threshold. It can only remove a cap (`0.5` to the tier's own value) or apply one.
 

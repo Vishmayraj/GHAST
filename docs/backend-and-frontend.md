@@ -32,7 +32,7 @@ What the mock data depicts, so nobody mistakes it for output:
 
 - A vessel named "MV KESTREL BAY" flagged as `targeted_spoof` at 0.81 confidence, with evidence text that includes a "DBSCAN fleet-wide check" and "6 known jamming/spoofing zones on file". Neither exists: fleet-wide DBSCAN clustering is a Stage 2 item (`ml/models/clustering/` is a README), and the zones table is empty.
 - Deviation values in meters. The real detector's error is in degrees of latitude and longitude, and there is no meter conversion anywhere.
-- Incident feed statuses such as "Auto-dismissed" and "Report generated". The real statuses are `reported` and `escalated` (and never-set `resolved`); nothing is auto-dismissed.
+- Incident feed statuses such as "Auto-dismissed" and "Report generated". The real statuses are `reported` and `escalated`, plus `resolved` once an analyst records a verdict with `agent/review.py`; nothing is auto-dismissed.
 - Its hypotheses list "Area jamming" and "Equipment fault" alongside targeted spoof. `freeze_replay`, a real hypothesis the agent produces, does not appear.
 
 The site's page copy describes the approach in product terms. Statements there about detection, fleet differentiation and the analyst desk are marketing narrative about the intended platform and were not checked against the code beyond the mock data above. Treat the site as a design artifact, not documentation of the system.

@@ -11,9 +11,9 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
 | `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 36 | `ml/` |
-| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history` | 43 | `agent/` |
-| `scoring/tests` | `test_live_scorer.py` | 9 | `scoring/` |
-| total | 19 files | 124 | |
+| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review` | 82 | `agent/` |
+| `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py` | 19 | `scoring/` |
+| total | 22 files | 173 | |
 
 The ML total is 64. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 57 cases for its 13 functions. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
 
@@ -69,7 +69,9 @@ Evaluation: precision, recall, F1 and confusion counts; the harness on a 25-row 
 
 Agent: `form_hypothesis` tiers, the exact boundary around `OPERATING_THRESHOLD`, single-detector cap, detector corroboration in evidence, freeze tiering and its backward compatibility, jamming priority, `investigate` audit trail and persistence, the Laya tool (stub, prediction passthrough, shared summary text, too little history, exceptions) and the vote rules, report input compaction and error handling, track history and jamming zone queries via fake connections.
 
-Scoring: a high error triggers `investigate`, a low error does not, a frozen position votes with zero error, `--min-votes 2`, open-incident debounce, no re-investigation on the next poll, per-cycle cap with deferral and retry, short-history skip, `build_tools` registering the classifier stub.
+Agent additions in the trust pass: the freeze minimum (3 frozen pairs) and 20-report window, `track_history` stopping at the flag with an opt-in `after` slice, the two `incident_history` queries and `targeted_spoof` depending only on `same_vessel`, Laya agreeing only with the hypothesis's own label, the weak-isolated-flag `benign` rule, no drafted report for `benign`, `window_start`/`window_end` on the persisted row, and the review CLI functions (list, show, verdict, refusing to overwrite, unknown ids and verdicts) against a fake connection.
+
+Scoring: the flag carries the scored window's bounds, a high error triggers `investigate`, a low error does not, a frozen position votes with zero error, `--min-votes 2`, open-incident debounce, no re-investigation on the next poll, per-cycle cap with deferral and retry, short-history skip, `build_tools` registering the classifier stub. `test_review_stats.py` covers the two precision definitions, `unclear` leaving the denominator, the `unresolved` hypothesis never being a hit, and the "too few to trust" and per-row markers.
 
 ## Requires external services or cannot run in a clean checkout
 
@@ -83,7 +85,7 @@ By the code, not by trying:
 
 - No test runs SQL. The four large streaming queries (`POSITION_QUERY` and friends), `RECENT_REPORTS_QUERY`, `ACTIVE_VESSELS_QUERY`, `OPEN_INCIDENT_QUERY`, `JAMMING_ZONE_QUERY`, `TRACK_HISTORY_QUERY`, the incident insert, and `schema.sql` itself are exercised only through fakes that do not check the SQL. A typo would be found first against a real database.
 - `train_from_shards`, `_run_epoch` and `run_training` have no test. `materialize_to_shards` is not tested against a stream. The shard writer and batch iterator are.
-- `incident_history.find_similar_incidents` and `persist_incident` are not tested.
+- `incident_history.find_similar_incidents`, `persist_incident` and the review queries are tested only against fakes. The new incidents SQL and the new `track_history` queries were also run once by hand against a scratch PostgreSQL 16 with PostGIS (a plain `vessel_position` table, not TimescaleDB); that run is not part of the suite.
 - No test covers the collector's reconnect logic, `IngestionConfig`, `TimescaleWriter`, `RawArchiver`, or `ingestion/main.py` batching.
 - `load_laya_predictor` is never run against the real library, so a mismatch with Laya's API would show up only when the model is enabled.
 - `live_scorer`'s watermark and overlap logic is only exercised over one or two polls. Nothing tests a late-committed row landing inside the overlap.
