@@ -4,3 +4,4 @@
 numpy>=1.26
 asyncpg>=0.29
 python-dotenv>=1.0
+groq>=0.11  # optional at runtime: agents fall back to deterministic baselines without GROQ_API_KEY

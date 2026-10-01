@@ -44,11 +44,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -71,6 +72,7 @@ from features.extract import (  # noqa: E402
 )
 from features.pipeline import WINDOW_LENGTH, FeatureWindow, window_rows  # noqa: E402
 from features.quality import transition_reasons  # noqa: E402
+from features.score_histogram import histogram_counts  # noqa: E402
 from models.bilstm.threshold import OPERATING_THRESHOLD  # noqa: E402
 from orchestrator.state_machine import (  # noqa: E402
     FlaggedAnomaly, InvestigationResult, Persist, Tool, investigate, persist_incident,
@@ -79,6 +81,7 @@ from tools.incident_history import find_similar_incidents  # noqa: E402
 from tools.jamming_zones import check_jamming_zones  # noqa: E402
 from tools.pattern_classifier import Predict, build_pattern_classifier, load_laya_predictor  # noqa: E402
 from tools.track_history import get_track_history  # noqa: E402
+from threshold_agent.agent import Budgets, DEFAULT_BUDGET_A, DEFAULT_BUDGET_B, build_threshold_agent, retune as retune_thresholds  # noqa: E402
 
 logger = logging.getLogger("ghast.scoring")
 
@@ -124,6 +127,34 @@ SELECT 1 FROM incidents WHERE mmsi = $1 AND status <> 'resolved' AND created_at 
 """
 
 
+ACTIVE_THRESHOLDS_QUERY = """
+SELECT threshold_a, threshold_b, model_version FROM threshold_config ORDER BY id DESC LIMIT 1
+"""
+
+RECORD_STATS_QUERY = """
+INSERT INTO scoring_stats (model_version, reports_scored, skipped_unscorable, flagged_a, flagged_b, histogram)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+"""
+
+
+@dataclass(frozen=True)
+class ActiveThresholds:
+    """Alert thresholds in force (degrees of prediction error). B > A."""
+
+    a: float
+    b: float
+    model_version: str | None = None
+
+
+ThresholdSource = Callable[[], Awaitable["ActiveThresholds | None"]]
+AfterPersist = Callable[["FlaggedAnomaly", "InvestigationResult"], Awaitable[None]]
+Retune = Callable[[], Awaitable[Any]]
+
+# The threshold agent is asked to look again at least this often, and immediately whenever the
+# model version differs from the one the active thresholds were set for.
+DEFAULT_RETUNE_INTERVAL_SECONDS = 3600.0
+
+
 @dataclass(frozen=True)
 class DetectorThresholds:
     """Per-detector triggers, using evaluation's strict `score > threshold` comparison."""
@@ -156,6 +187,9 @@ class CycleSummary:
     investigated: int = 0
     failed: int = 0
     skipped_unscorable: int = 0
+    flagged_a: int = 0
+    flagged_b: int = 0
+    observing_only: bool = False
 
     def __str__(self) -> str:
         return " ".join(f"{name}={value}" for name, value in vars(self).items())
@@ -168,6 +202,10 @@ class Store(Protocol):
     async def active_mmsis(self, since: datetime) -> list[int]: ...
     async def recent_reports(self, mmsi: int, not_before: datetime, limit: int) -> list[dict[str, Any]]: ...
     async def has_open_incident(self, mmsi: int, since: datetime) -> bool: ...
+    async def record_stats(
+        self, model_version: str | None, reports_scored: int, skipped: int, flagged_a: int, flagged_b: int,
+        histogram: list[int],
+    ) -> None: ...
 
 
 class PostgresStore:
@@ -190,6 +228,25 @@ class PostgresStore:
 
     async def has_open_incident(self, mmsi: int, since: datetime) -> bool:
         return await self._db.fetchval(OPEN_INCIDENT_QUERY, mmsi, since) is not None
+
+    async def record_stats(
+        self, model_version: str | None, reports_scored: int, skipped: int, flagged_a: int, flagged_b: int,
+        histogram: list[int],
+    ) -> None:
+        await self._db.execute(RECORD_STATS_QUERY, model_version, reports_scored, skipped, flagged_a, flagged_b, json.dumps(histogram))
+
+
+class PostgresThresholds:
+    """Reads the newest threshold_config row (written by the threshold agent or an analyst)."""
+
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    async def __call__(self) -> ActiveThresholds | None:
+        row = await self._db.fetchrow(ACTIVE_THRESHOLDS_QUERY)
+        if row is None:
+            return None
+        return ActiveThresholds(float(row["threshold_a"]), float(row["threshold_b"]), row["model_version"])
 
 
 def _implied_acceleration(features: np.ndarray) -> list[float | None]:
@@ -247,6 +304,7 @@ def detector_votes(observation: AISObservation, thresholds: DetectorThresholds) 
 
 def evaluate_window(
     window: FeatureWindow, errors: np.ndarray, cutoff: datetime, thresholds: DetectorThresholds, min_votes: int,
+    threshold_b: float | None = None,
 ) -> FlaggedAnomaly | None:
     """Return a FlaggedAnomaly for the strongest new report, or None.
 
@@ -284,6 +342,8 @@ def evaluate_window(
         detector_votes=votes,
         window_start=window.timestamps[0],
         window_end=window.timestamps[-1],
+        tier="B" if threshold_b is not None and VOTE_PREDICTION_ERROR in votes and float(observations[index].prediction_error or 0.0) >= threshold_b else "A",
+        threshold_a=thresholds.prediction_error,
     )
 
 
@@ -300,6 +360,11 @@ class LiveScorer:
         persist: Persist,
         config: ScorerConfig,
         investigate_fn: InvestigateFn = investigate,  # type: ignore[assignment]
+        threshold_source: ThresholdSource | None = None,
+        model_version: str | None = None,
+        after_persist: AfterPersist | None = None,
+        retune: Retune | None = None,
+        retune_interval_seconds: float = DEFAULT_RETUNE_INTERVAL_SECONDS,
     ) -> None:
         self._store = store
         self._score_errors = score_errors
@@ -307,6 +372,16 @@ class LiveScorer:
         self._persist = persist
         self._config = config
         self._investigate = investigate_fn
+        # With no threshold source the scorer is static: config.thresholds.prediction_error is
+        # threshold A and there is no tier B. With one, thresholds come from threshold_config
+        # every cycle, and until a row exists the scorer only observes (see poll_once).
+        self._threshold_source = threshold_source
+        self._model_version = model_version
+        self._after_persist = after_persist
+        self._retune = retune
+        self._retune_interval = retune_interval_seconds
+        self._last_retune: datetime | None = None
+        self._observing_logged = False
         self._watermark: datetime | None = None
         self._last_scored: dict[int, datetime] = {}
         self._cooldown: dict[int, datetime] = {}
@@ -322,6 +397,24 @@ class LiveScorer:
             return True
         return await self._store.has_open_incident(mmsi, now - window)
 
+    async def _maybe_retune(self, now: datetime) -> None:
+        """Ask the threshold agent to look again: on a schedule, and right after a model change."""
+        if self._retune is None:
+            return
+        due = self._last_retune is None or (now - self._last_retune).total_seconds() >= self._retune_interval
+        if not due and self._threshold_source is not None:
+            active = await self._threshold_source()
+            due = active is None or active.model_version != self._model_version
+            if due and self._last_retune is not None and (now - self._last_retune).total_seconds() < 300:
+                due = False  # a model-change retune that kept the thresholds must not run every cycle
+        if not due:
+            return
+        self._last_retune = now
+        try:
+            await self._retune()
+        except Exception:  # noqa: BLE001 - keep scoring with the thresholds already in force
+            logger.exception("threshold retune failed")
+
     async def poll_once(self) -> CycleSummary:
         config = self._config
         summary = CycleSummary()
@@ -329,6 +422,17 @@ class LiveScorer:
         since = self._watermark or cycle_started - timedelta(minutes=config.initial_lookback_minutes)
         not_before = cycle_started - timedelta(hours=config.window_max_age_hours)
 
+        thresholds, threshold_b, observing = config.thresholds, None, False
+        if self._threshold_source is not None:
+            await self._maybe_retune(cycle_started)
+            active = await self._threshold_source()
+            if active is None:
+                observing = True
+                summary.observing_only = True
+            else:
+                thresholds = replace(config.thresholds, prediction_error=active.a)
+                threshold_b = active.b
+        score_samples: list[np.ndarray] = []
         mmsis = await self._store.active_mmsis(since)
         summary.vessels_seen = len(mmsis)
         candidates_by_mmsi: dict[int, FlaggedAnomaly] = dict(self._deferred)
@@ -346,10 +450,12 @@ class LiveScorer:
             summary.windows_scored += 1
             self._last_scored[mmsi] = window.timestamps[-1]
             skipped = transition_reasons(window.positions, window.timestamps)
-            summary.skipped_unscorable += sum(
-                1 for i, r in enumerate(skipped) if r is not None and window.timestamps[i] > cutoff
-            )
-            anomaly = evaluate_window(window, errors, cutoff, config.thresholds, config.min_votes)
+            fresh = [i for i in range(1, len(skipped)) if window.timestamps[i] > cutoff]
+            summary.skipped_unscorable += sum(1 for i in fresh if skipped[i] is not None)
+            score_samples.append(np.array([errors[i] for i in fresh if skipped[i] is None], dtype=np.float64))
+            if observing:
+                continue  # no thresholds yet: score and record, flag nothing
+            anomaly = evaluate_window(window, errors, cutoff, thresholds, config.min_votes, threshold_b)
             if anomaly is not None:
                 previous = candidates_by_mmsi.get(anomaly.mmsi)
                 if previous is None or (
@@ -367,6 +473,10 @@ class LiveScorer:
         )
         for anomaly in candidates:
             summary.flagged += 1
+            if anomaly.tier == "B":
+                summary.flagged_b += 1
+            else:
+                summary.flagged_a += 1
             if await self._is_debounced(anomaly.mmsi, cycle_started):
                 summary.debounced += 1
                 continue
@@ -384,9 +494,29 @@ class LiveScorer:
                 continue
             summary.investigated += 1
             logger.info(
-                "investigated mmsi=%s votes=%s score=%.6f hypothesis=%s confidence=%.2f",
-                anomaly.mmsi, sorted(anomaly.detector_votes), anomaly.anomaly_score, result.hypothesis, result.confidence,
+                "investigated mmsi=%s tier=%s votes=%s score=%.6f hypothesis=%s confidence=%.2f",
+                anomaly.mmsi, anomaly.tier, sorted(anomaly.detector_votes), anomaly.anomaly_score, result.hypothesis, result.confidence,
             )
+            if self._after_persist is not None:
+                try:
+                    await self._after_persist(anomaly, result)
+                except Exception:  # noqa: BLE001 - the incident is already stored; follow-up agents must not undo that
+                    logger.exception("follow-up agents failed for incident %s", result.incident_id)
+
+        scored_errors = np.concatenate(score_samples) if score_samples else np.array([], dtype=np.float64)
+        if scored_errors.size or summary.skipped_unscorable:
+            try:
+                await self._store.record_stats(
+                    self._model_version, int(scored_errors.size), summary.skipped_unscorable,
+                    summary.flagged_a, summary.flagged_b, histogram_counts(scored_errors),
+                )
+            except Exception:  # noqa: BLE001 - stats are for the threshold agent, never a reason to stop scoring
+                logger.exception("could not record scoring stats")
+        if observing and not self._observing_logged:
+            logger.warning("no alert thresholds set yet: scoring and recording stats only, flagging nothing until the threshold agent (or `thresholds.py set`) sets them")
+            self._observing_logged = True
+        elif not observing:
+            self._observing_logged = False
 
         # Advance only after a full pass: an exception above rescans the same range.
         self._watermark = cycle_started - timedelta(seconds=config.overlap_seconds)
@@ -451,6 +581,28 @@ def load_model_scorer(checkpoint_path: Path, device_name: str | None) -> tuple[S
     return (lambda window: prediction_errors(model, window)), checkpoint
 
 
+def model_version_of(checkpoint_path: Path, checkpoint: dict, laya_model: str | None) -> str:
+    """Identity of the models doing the scoring. It changes when a checkpoint is replaced or the
+    Laya model is re-fine-tuned, which is what tells the threshold agent to look again."""
+    parts = [f"{checkpoint_path.name}:e{checkpoint.get('epoch')}:{int(checkpoint_path.stat().st_mtime)}"]
+    if laya_model:
+        laya_path = Path(laya_model)
+        parts.append(f"laya:{laya_path.name}:{int(laya_path.stat().st_mtime) if laya_path.exists() else 'missing'}")
+    return "+".join(parts)
+
+
+def build_llm_client() -> Any | None:
+    """A Groq client when GROQ_API_KEY is set, else None (agents then use their baselines)."""
+    if not os.environ.get("GROQ_API_KEY"):
+        return None
+    try:
+        from groq import AsyncGroq
+        return AsyncGroq()
+    except Exception as error:  # noqa: BLE001
+        logger.warning("llm missing: %s (agents run on their deterministic baselines)", type(error).__name__)
+        return None
+
+
 async def _serve(args: argparse.Namespace) -> int:
     import asyncpg
     from dotenv import load_dotenv
@@ -458,15 +610,14 @@ async def _serve(args: argparse.Namespace) -> int:
     # Local development keeps credentials in the repository's ignored .env. Do not
     # override an environment value supplied by Docker, CI, or the process manager.
     load_dotenv(_REPO_ROOT / ".env")
-    score_errors, checkpoint = load_model_scorer(Path(args.checkpoint), args.device)
-    logger.info(
-        "loaded checkpoint=%s epoch=%s operating_threshold=%s",
-        args.checkpoint, checkpoint.get("epoch"), OPERATING_THRESHOLD,
-    )
+    checkpoint_path = Path(args.checkpoint)
+    score_errors, checkpoint = load_model_scorer(checkpoint_path, args.device)
+    version = model_version_of(checkpoint_path, checkpoint, args.laya_model)
+    logger.info("loaded model_version=%s", version)
 
     config = ScorerConfig(
         thresholds=DetectorThresholds(
-            prediction_error=float(OPERATING_THRESHOLD),
+            prediction_error=float(OPERATING_THRESHOLD) if args.static_threshold else 1.0,  # replaced each cycle unless --static-threshold
             freeze_replay=args.freeze_replay_threshold,
             speed_jump=args.speed_jump_threshold,
         ),
@@ -481,14 +632,31 @@ async def _serve(args: argparse.Namespace) -> int:
         try:
             pattern_predict = load_laya_predictor(args.laya_model, args.device)
             logger.info("loaded Laya pattern classifier from %s", args.laya_model)
-        except Exception:  # ImportError if laya is not installed, or a bad checkpoint path
-            logger.exception("Laya model %s could not be loaded: continuing with the neutral pattern_classifier stub", args.laya_model)
+        except Exception as error:  # ImportError if laya is not installed, or a bad checkpoint path
+            logger.warning("laya missing: could not load %s (%s); scoring continues without it", args.laya_model, type(error).__name__)
     else:
-        logger.warning("GHAST_LAYA_MODEL not set: pattern_classifier runs as a neutral stub")
+        logger.warning("laya missing: GHAST_LAYA_MODEL not set; scoring continues without it")
 
     pool = await asyncpg.create_pool(args.dsn, min_size=1, max_size=3)
     try:
-        scorer = LiveScorer(PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), config)
+        client = build_llm_client()
+        if client is None:
+            logger.warning("llm missing: GROQ_API_KEY not set; agents use their deterministic baselines")
+        model = os.environ.get("GHAST_AGENT_MODEL") or os.environ.get("GHAST_REPORT_MODEL") or "openai/gpt-oss-120b"
+        budgets = Budgets(args.budget_a, args.budget_b)
+        threshold_agent = build_threshold_agent(pool, client, model, version, budgets, _REPO_ROOT / "ml" / "reports")
+
+        async def retune() -> None:
+            await retune_thresholds(pool, threshold_agent, version, budgets)
+
+        dynamic = not args.static_threshold
+        scorer = LiveScorer(
+            PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), config,
+            threshold_source=PostgresThresholds(pool) if dynamic else None,
+            model_version=version,
+            retune=retune if dynamic else None,
+            retune_interval_seconds=args.retune_interval_seconds,
+        )
         if args.once:
             print(f"cycle: {await scorer.poll_once()}")
             return 0
@@ -511,13 +679,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--initial-lookback-minutes", type=float, default=DEFAULT_INITIAL_LOOKBACK_MINUTES, help="How far back the first cycle looks for new reports.")
     parser.add_argument("--laya-model", default=os.environ.get("GHAST_LAYA_MODEL"), help="Path to a fine-tuned Laya checkpoint directory. Defaults to $GHAST_LAYA_MODEL; unset means a neutral stub.")
     parser.add_argument("--device", choices=("cpu", "cuda"), help="Defaults to cpu.")
+    parser.add_argument("--static-threshold", action="store_true", help="Legacy mode: use models.bilstm.threshold.OPERATING_THRESHOLD as the only threshold, no tiers, no agent. Not recommended: that constant is a leftover from injected data.")
+    parser.add_argument("--budget-a", type=float, default=float(os.environ.get("GHAST_BUDGET_A", DEFAULT_BUDGET_A)), help="Alert budget for threshold A: share of scoreable reports that may reach the console. Placeholder default; the owner's call.")
+    parser.add_argument("--budget-b", type=float, default=float(os.environ.get("GHAST_BUDGET_B", DEFAULT_BUDGET_B)), help="Alert budget for threshold B: share of reports that are reported automatically.")
+    parser.add_argument("--retune-interval-seconds", type=float, default=DEFAULT_RETUNE_INTERVAL_SECONDS, help="How often the threshold agent looks again (it also looks right after a model change).")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit.")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    if OPERATING_THRESHOLD is None:
-        print("OPERATING_THRESHOLD is None (models/bilstm/threshold.py): refusing to score without a real threshold.", file=sys.stderr)
+    if args.static_threshold and OPERATING_THRESHOLD is None:
+        print("OPERATING_THRESHOLD is None (models/bilstm/threshold.py): refusing --static-threshold without one.", file=sys.stderr)
         return 2
+    if not 0 < args.budget_b < args.budget_a < 1:
+        parser.error("budgets must satisfy 0 < budget-b < budget-a < 1")
     if not args.dsn:
         parser.error("--dsn is required (or set POSTGRES_DSN)")
     if not args.checkpoint:
