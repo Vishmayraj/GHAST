@@ -14,7 +14,7 @@ ARG WITH_LAYA=0
 RUN if [ "$WITH_LAYA" = "1" ]; then pip install --no-cache-dir -r scoring/requirements-laya.txt; fi
 
 # live_scorer.py reuses ml/ (features, model, detectors, threshold) and agent/ (state
-# machine, tools, report drafter) in place rather than keeping a second copy.
+# machine and tools) in place rather than keeping a second copy.
 COPY ml/ ./ml/
 COPY agent/ ./agent/
 COPY scoring/ ./scoring/

@@ -27,11 +27,10 @@ async def test_reporting_is_audited_and_persisted() -> None:
     async def persist(row): saved.append(row)
     anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.9, "position", 10, 20)
     tools = {"track_history": await _tool({"positions": []}), "jamming_zones": await _tool({"matched": True}), "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
-    result = await investigate(anomaly, tools, persist, report=lambda row: _report())
+    result = await investigate(anomaly, tools, persist)
     assert result.state is InvestigationState.DONE
     assert saved[0]["status"] == "reported" and len(saved[0]["tool_call_log"]) == 3
 
-async def _report(): return "draft"
 
 # Pins the exact off-by-a-guessed-constant bug this branch used to have: it
 # compared anomaly_score against a hardcoded 0.3 that predated any real
@@ -65,7 +64,7 @@ def test_freeze_corroboration_promotes_to_freeze_replay_hypothesis() -> None:
     anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), OPERATING_THRESHOLD + 1e-6, "position", 10, 20)
     hypothesis, confidence = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_MATCHED})
     assert hypothesis == "freeze_replay"
-    assert confidence >= 0.7  # must clear REPORT_CONFIDENCE_THRESHOLD to auto-report, not escalate
+    assert confidence >= 0.7  # must clear REPORT_CONFIDENCE_THRESHOLD to be reported, not escalated
 
 @requires_operating_threshold
 def test_freeze_corroboration_not_matched_falls_back_to_existing_tiers() -> None:
@@ -100,7 +99,7 @@ def test_single_detector_vote_caps_confidence_below_report_threshold() -> None:
     )
     hypothesis, confidence = form_hypothesis(anomaly, {**_NEUTRAL_EVIDENCE, "freeze_corroboration": _FREEZE_MATCHED})
     assert hypothesis == "freeze_replay"  # the tier itself is unaffected, only its confidence
-    assert confidence < REPORT_CONFIDENCE_THRESHOLD  # escalates instead of auto-reporting
+    assert confidence < REPORT_CONFIDENCE_THRESHOLD  # escalates instead of being reported
 
 @requires_operating_threshold
 def test_two_detector_votes_are_not_capped() -> None:
@@ -145,7 +144,7 @@ async def test_investigate_logs_detector_corroboration_in_evidence() -> None:
         detector_votes=frozenset({"prediction_error", "speed_jump"}),
     )
     tools = {"track_history": await _tool({"positions": []}), "jamming_zones": await _tool({"matched": True}), "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
-    result = await investigate(anomaly, tools, persist, report=lambda row: _report())
+    result = await investigate(anomaly, tools, persist)
     assert result.evidence["detector_corroboration"] == {"votes": ["prediction_error", "speed_jump"], "count": 2}
     assert saved[0]["evidence"]["detector_corroboration"]["count"] == 2
 
@@ -253,15 +252,14 @@ def test_freeze_corroboration_outranks_the_benign_rule() -> None:
 
 @pytest.mark.asyncio
 @requires_operating_threshold
-async def test_benign_incident_is_persisted_without_a_drafted_report() -> None:
-    saved, drafted = [], []
+async def test_benign_incident_is_persisted_with_no_report_text() -> None:
+    saved = []
     async def persist(row): saved.append(row)
-    async def report(row): drafted.append(row); return "draft"
     tools = {"track_history": await _tool(_stationary_track()), "jamming_zones": await _tool({"matched": False}),
              "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
-    await investigate(_weak_flag(), tools, persist, report=report)
+    await investigate(_weak_flag(), tools, persist)
     assert saved[0]["hypothesis"] == "benign"
-    assert drafted == [] and "report_text" not in saved[0]
+    assert "report_text" not in saved[0]
 
 # incidents.window_start / window_end come from the scored window carried on the flag.
 @pytest.mark.asyncio
@@ -292,3 +290,19 @@ async def test_persist_incident_writes_window_columns() -> None:
     query, args = connection.calls[0]
     assert "window_start, window_end" in query and "$13,$14" in query
     assert args[-2:] == (start, end)
+
+
+def test_the_report_draft_threshold_sits_above_the_reported_line() -> None:
+    from orchestrator.state_machine import REPORT_DRAFT_CONFIDENCE_THRESHOLD
+    assert REPORT_DRAFT_CONFIDENCE_THRESHOLD > REPORT_CONFIDENCE_THRESHOLD
+
+
+@pytest.mark.asyncio
+async def test_a_reported_incident_is_never_given_report_text_during_investigation() -> None:
+    saved = []
+    async def persist(row): saved.append(row)
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.9, "position", 10, 20)
+    tools = {"track_history": await _tool({"positions": []}), "jamming_zones": await _tool({"matched": True}),
+             "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
+    await investigate(anomaly, tools, persist)
+    assert saved[0]["status"] == "reported" and "report_text" not in saved[0]

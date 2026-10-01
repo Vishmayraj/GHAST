@@ -81,8 +81,6 @@ services:
       GHAST_CHECKPOINT: /checkpoints/epoch_010.pt
       # Set to /laya_model (and build with WITH_LAYA=1) once a fine-tuned checkpoint exists.
       GHAST_LAYA_MODEL: ${GHAST_LAYA_MODEL:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GHAST_REPORT_MODEL: ${GHAST_REPORT_MODEL:-openai/gpt-oss-120b}
     volumes:
       # *.pt is gitignored; train or copy the checkpoint into ml/checkpoints first.
       - ../../ml/checkpoints:/checkpoints:ro

@@ -12,11 +12,20 @@ from tools.freeze_corroboration import corroborate_freeze_replay
 from tools.stationary import window_is_stationary
 
 REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate with reviewed incidents in Stage 3.
+# The line between status "reported" (at or above) and "escalated" (below). It no longer
+# triggers any report: nothing is drafted during the investigation (see the next constant).
+
+# Higher bar for drafting an LLM report at an analyst's request (report_generator/on_demand.py).
+# Reports are never drafted automatically, so no tokens or storage are spent on incidents
+# nobody opened. With the current tiers this admits jamming (0.85) and a corroborated
+# freeze_replay (0.8) and leaves targeted_spoof (0.72) and equipment_fault (0.55) out.
+# Uncalibrated placeholder; revisit with reviewed incidents (scoring/review_stats.py).
+REPORT_DRAFT_CONFIDENCE_THRESHOLD = 0.8
 
 # Per ImplementationPlans/old/Sem5_BigPass_LiveScoring_And_Laya.md section 3: a flag where
 # only one detector fired is weaker evidence than one where two or more independently
 # agree - this is a first pass at that distinction (a hard cap below
-# REPORT_CONFIDENCE_THRESHOLD so it escalates instead of auto-reporting), not a claim
+# REPORT_CONFIDENCE_THRESHOLD so it escalates instead of being reported), not a claim
 # that it fully solves the followup run's 19.4% control false-positive rate. A proper
 # fix (per-vessel-class or per-region threshold normalization) remains future work.
 SINGLE_DETECTOR_CONFIDENCE_CAP = 0.5
@@ -75,7 +84,6 @@ class InvestigationResult:
 
 Tool = Callable[[FlaggedAnomaly], Awaitable[dict[str, Any]]]
 Persist = Callable[[dict[str, Any]], Awaitable[None]]
-Report = Callable[[dict[str, Any]], Awaitable[str]]
 
 async def persist_incident(connection: Any, row: dict[str, Any]) -> None:
     """Store the complete audit trail in the schema-owned incidents record."""
@@ -188,8 +196,10 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
         return _apply_single_detector_cap(anomaly, "targeted_spoof", 0.72, evidence)
     return _apply_single_detector_cap(anomaly, "equipment_fault", 0.55, evidence)
 
-async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: Persist, report: Report | None = None) -> InvestigationResult:
-    """Gather all evidence before branching, then persist either report or escalation."""
+async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: Persist) -> InvestigationResult:
+    """Gather all evidence before branching, then persist the incident as reported or escalated.
+
+    No LLM is called here. A report is drafted later, on request, from the stored incident."""
     log: list[dict[str, Any]] = []; evidence: dict[str, Any] = {}
     for name in ("track_history", "jamming_zones", "incident_history"):
         result = await tools[name](anomaly); evidence[name] = result; log.append({"tool": name, "result": result})
@@ -203,7 +213,7 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
             result = {"available": False, "pattern": None, "confidence": None, "probabilities": None, "reason": f"tool error: {type(error).__name__}"}
         evidence["pattern_classifier"] = result; log.append({"tool": "pattern_classifier", "result": result})
     # Derived, not a tool call: computed once here from track_history's own result
-    # so it's logged in evidence (persisted, and available to the report drafter)
+    # so it's logged in evidence (persisted, and available to the on-demand report drafter)
     # without inflating tool_call_log's count of actual evidence-gathering calls.
     evidence["freeze_corroboration"] = corroborate_freeze_replay(evidence["track_history"])
     # Audit trail for the corroboration section 3 of the BigPass plan asks for: which of
@@ -214,12 +224,5 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     state = InvestigationState.REPORTING if confidence >= REPORT_CONFIDENCE_THRESHOLD else InvestigationState.ESCALATING
     row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude), "window_start": anomaly.window_start, "window_end": anomaly.window_end}
-    # A benign call needs no drafted narrative (and no model call spent on it).
-    if state is InvestigationState.REPORTING and report is not None and hypothesis != "benign":
-        report_text = await report(row)
-        # An optional provider may return an empty string after a handled outage or
-        # rate limit; keep the database value NULL rather than recording a fake report.
-        if report_text:
-            row["report_text"] = report_text
     await persist(row)
     return InvestigationResult(InvestigationState.DONE, hypothesis, confidence, evidence, log)

@@ -73,7 +73,7 @@ class Recorder:
     def __init__(self) -> None:
         self.anomalies = []
 
-    async def __call__(self, anomaly, tools, persist, report):
+    async def __call__(self, anomaly, tools, persist):
         self.anomalies.append(anomaly)
         return InvestigationResult(InvestigationState.DONE, "targeted_spoof", 0.5, {}, [])
 
@@ -95,7 +95,6 @@ def build(store, errors, recorder, **config_overrides) -> LiveScorer:
         score_errors=lambda window: errors,
         tools={},
         persist=None,  # never reached: investigate is replaced
-        report=None,
         config=config,
         investigate_fn=recorder,
     )

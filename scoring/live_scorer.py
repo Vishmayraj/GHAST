@@ -24,9 +24,8 @@ Design notes worth knowing before changing anything:
 * The followup evaluation measured a 19.4% control false-positive rate for the
   prediction-error detector, so in live traffic a large share of single-detector flags
   are expected to be noise. The state machine caps single-detector confidence so those
-  escalate instead of auto-reporting, and --max-investigations-per-cycle bounds how many
-  investigations (and Groq report calls) one poll can start. Both are first-pass
-  mitigations; per-vessel-class or per-region threshold normalization is future work.
+  escalate instead of being reported, and --max-investigations-per-cycle bounds how many
+  investigations one poll can start. Both are first-pass mitigations; per-vessel-class or per-region threshold normalization is future work.
 * freeze_replay's trigger defaults to features.extract.FREEZE_DISPLACEMENT_EPSILON_KNOTS,
   matching the agent's own corroboration check. speed_jump has no swept threshold on
   record yet, so it does not vote unless --speed-jump-threshold is given.
@@ -38,8 +37,8 @@ Usage (from the repo root, with the ml/ and agent/ dependencies installed):
     # one cycle over the last 6 hours of live data, then exit:
     python live_scorer.py ... --once --initial-lookback-minutes 360
 
-Set GROQ_API_KEY to have reportable incidents drafted through Groq (model from
-GHAST_REPORT_MODEL); without it incidents are still persisted, just with no report_text.
+No LLM runs in this service. Reports are drafted on request from a stored incident
+(agent/report_generator/on_demand.py), never during scoring.
 """
 from __future__ import annotations
 
@@ -73,9 +72,8 @@ from features.extract import (  # noqa: E402
 from features.pipeline import WINDOW_LENGTH, FeatureWindow, window_rows  # noqa: E402
 from models.bilstm.threshold import OPERATING_THRESHOLD  # noqa: E402
 from orchestrator.state_machine import (  # noqa: E402
-    FlaggedAnomaly, InvestigationResult, Persist, Report, Tool, investigate, persist_incident,
+    FlaggedAnomaly, InvestigationResult, Persist, Tool, investigate, persist_incident,
 )
-from report_generator.report import draft_report  # noqa: E402
 from tools.incident_history import find_similar_incidents  # noqa: E402
 from tools.jamming_zones import check_jamming_zones  # noqa: E402
 from tools.pattern_classifier import Predict, build_pattern_classifier, load_laya_predictor  # noqa: E402
@@ -283,7 +281,7 @@ def evaluate_window(
 
 
 ScoreErrors = Callable[[FeatureWindow], np.ndarray]
-InvestigateFn = Callable[[FlaggedAnomaly, Mapping[str, Tool], Persist, Report | None], Awaitable[InvestigationResult]]
+InvestigateFn = Callable[[FlaggedAnomaly, Mapping[str, Tool], Persist], Awaitable[InvestigationResult]]
 
 
 class LiveScorer:
@@ -293,7 +291,6 @@ class LiveScorer:
         score_errors: ScoreErrors,
         tools: Mapping[str, Tool],
         persist: Persist,
-        report: Report | None,
         config: ScorerConfig,
         investigate_fn: InvestigateFn = investigate,  # type: ignore[assignment]
     ) -> None:
@@ -301,7 +298,6 @@ class LiveScorer:
         self._score_errors = score_errors
         self._tools = tools
         self._persist = persist
-        self._report = report
         self._config = config
         self._investigate = investigate_fn
         self._watermark: datetime | None = None
@@ -370,7 +366,7 @@ class LiveScorer:
                 continue
             self._cooldown[anomaly.mmsi] = cycle_started
             try:
-                result = await self._investigate(anomaly, self._tools, self._persist, self._report)
+                result = await self._investigate(anomaly, self._tools, self._persist)
             except Exception:
                 summary.failed += 1
                 logger.exception("investigation failed mmsi=%s", anomaly.mmsi)
@@ -428,18 +424,6 @@ def build_persist(db: Any) -> Persist:
     return persist
 
 
-def build_report(client: Any) -> Report:
-    async def report(row: dict[str, Any]) -> str:
-        try:
-            return await draft_report(row, client)
-        except Exception:
-            # Reporting is optional enrichment. Preserve the deterministic evidence
-            # and incident row even when Groq is unavailable or rate-limited.
-            logger.exception("Groq report generation failed; persisting incident without report_text")
-            return ""
-    return report
-
-
 def load_model_scorer(checkpoint_path: Path, device_name: str | None) -> tuple[ScoreErrors, dict]:
     """Load the BiLSTM once. torch is imported here, not at module import, so tests and
     tooling that never score a real window don't need it installed."""
@@ -469,13 +453,6 @@ async def _serve(args: argparse.Namespace) -> int:
         args.checkpoint, checkpoint.get("epoch"), OPERATING_THRESHOLD,
     )
 
-    report: Report | None = None
-    if os.environ.get("GROQ_API_KEY"):
-        from groq import AsyncGroq
-        report = build_report(AsyncGroq(max_retries=0))
-    else:
-        logger.warning("GROQ_API_KEY not set: reportable incidents are persisted without report_text")
-
     config = ScorerConfig(
         thresholds=DetectorThresholds(
             prediction_error=float(OPERATING_THRESHOLD),
@@ -500,7 +477,7 @@ async def _serve(args: argparse.Namespace) -> int:
 
     pool = await asyncpg.create_pool(args.dsn, min_size=1, max_size=3)
     try:
-        scorer = LiveScorer(PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), report, config)
+        scorer = LiveScorer(PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), config)
         if args.once:
             print(f"cycle: {await scorer.poll_once()}")
             return 0
