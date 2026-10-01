@@ -1,44 +1,64 @@
 # frontend/site/
 
-The public GHAST landing site. Plain HTML/CSS/JS, no build step, no
-framework — the scroll-driven hero, reveal animations and mock data
-views here don't need one, and adding React/webpack for a static
-explainer page would be complexity without a corresponding need.
-(The analyst dashboard in `frontend/dashboard/` is a different
-problem — real-time map state, incident filtering, drill-down — and
-is where the HLD's React + MapLibre/Deck.gl choice actually applies.)
-
-`assets/` lives inside `site/`, not as a `frontend/`-level sibling,
-specifically so `site/` is a self-contained tree: anything that
-serves this directory — `frontend/Dockerfile`'s
-`COPY frontend/site/ /usr/share/nginx/html/`, a static host, a CDN —
-gets the video for free, with no separate copy step to remember and
-no `../` path escaping the served root.
+The public GHAST site and the analyst console sample. Plain HTML, CSS and
+JS, no build step, no framework. `assets/` lives inside `site/` so anything
+that serves this directory (`frontend/Dockerfile`, a static host, a CDN)
+gets the hero video with no extra copy step.
 
 ## Structure
 
 ```
 site/
-  index.html            # home: hero + short teaser + links out
-  about.html             # differentiation / "what we do differently"
-  approach.html           # detection methodology + fleet differentiation
-  platform.html             # investigation agent + dashboard preview
-  assets/
-    ghast-hero.mp4 / .webm  # the cinematic hero video
+  index.html              home: hero, statement, three routes
+  how-it-works.html       predict, place it, investigate, decide
+  console.html            analyst console on sample data (the dashboard spec)
+  trust.html              alert budget, review loop, review statistics
+  project.html            what GHAST is and where it stands
+  assets/ghast-hero.mp4 / .webm
   styles/
-    tokens.css           # 5-color palette (ocean/navy/red/white/black),
-                          # Instrument Sans + Instrument Serif type scale
-    base.css             # reset, layout primitives, page-header pattern
-    nav.css               # shared fixed top nav (all pages)
-    hero.css              # pinned/scroll-scrubbed cinematic hero (index only)
-    sections.css            # explainer sections used on approach/platform/about
+    tokens.css            paper, ink, rules, one signal color; Newsreader, Geist, Geist Mono
+    base.css              reset, layout, buttons, reveal, browser surfaces
+    nav.css               header, mobile menu, footer
+    hero.css              scroll-scrubbed hero (home only)
+    pages.css             routes, steps, tables, shared patterns
+    console.css           console layout
   scripts/
-    scroll-hero.js        # two-phase scroll-scrub (index only, see below)
-    reveal.js              # IntersectionObserver-based scroll reveals
-    mock-data.js            # illustrative vessel/incident data (see below)
-    charts.js                # tiny inline-SVG chart/diagram helper
-    sections.js               # renders mock data into the DOM (approach/platform)
+    config.js             source: "sample" or "live", apiBase, apiKey
+    data/api.js           window.GHAST.data, the only thing UI code calls
+    data/sample.js        sample implementation (fictional vessels, relative times)
+    data/live.js          fetch implementation of the plan 02 endpoints
+    console.js            console modules
+    trust.js              trust modules
+    scroll-hero.js        two-phase scroll-scrub (home only)
+    ui.js                 header theme over the hero, mobile menu, reveals
 ```
+
+The pages are plain static HTML. Fonts load from Google Fonts with real
+fallbacks. Self-hosting them is a follow-up.
+
+## Data and module slots
+
+UI code never reads sample files directly. It calls `GHAST.data.*`, which
+resolves to the sample or live implementation from `config.js` (or
+`?source=live`). Field names match plan 02, so going live is a config change.
+If the API differs, change `data/sample.js` and `data/live.js`, not the modules.
+
+Each backend feature has a fixed `data-module` slot:
+
+| Slot | Page | Backend plan |
+|---|---|---|
+| `status-strip` | console | 06 healthchecks, 02 `/health` |
+| `incident-queue` | console | 02 `/incidents` |
+| `incident-detail` | console | 02 `/incidents/{id}`, 01 C |
+| `detector-votes` | console | 01 C4, 04 (shadow tag) |
+| `fleet-context` | console | 03 B |
+| `map` | console | 02 track, 03 A zones |
+| `review-form` | console | 01 D, 02 review POST |
+| `alert-budget` | trust | 01 A and B |
+| `review-stats` | trust | 01 D3 (needs a read endpoint in plan 02) |
+
+`model-versions` (plan 05) and `artifact-provenance` (plan 06) have no slot yet.
+Add one to `trust.html` when those exist.
 
 ## The hero video's encoding matters
 
@@ -61,7 +81,7 @@ ffmpeg -i <source> -an -c:v libvpx-vp9 -crf 30 -b:v 0 \
   ghast-hero.webm
 ```
 
-(`-an` drops audio — the element is always muted, so it's dead
+(`-an` drops audio. The element is always muted, so it's dead
 weight.)
 
 ## The hero — two phases over one scroll-scrubbed video
@@ -91,12 +111,8 @@ flagged):
 experience, not just a shorter transition: the video plays once,
 normally, unpinned, and the scroll-scrub logic doesn't run at all.
 
-## Mock data
+## Sample data
 
-Anywhere the site shows something that looks like real platform
-output (incident reports, the dashboard preview, deviation charts),
-the values come from `scripts/mock-data.js` rather than being
-hand-written into the markup, and are visibly labeled as illustrative.
-The intent is that this file is exactly what a real API response
-would replace — the DOM-building code doesn't know or care whether
-the object came from a `<script>` file or `fetch()`.
+Anything that looks like product output comes from `scripts/data/sample.js`
+and carries a "Sample data" tag. The vessels are fictional. Nothing on the
+site states an accuracy figure.

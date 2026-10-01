@@ -1,3 +1,5 @@
 # frontend/dashboard/
 
-React app with a map layer (MapLibre GL or Deck.gl). Stage 1 scope (Weeks 14-16 of `ImplementationPlans/old/Sem5IP.md`; the current plan is `ImplementationPlans/02_Delivery_Layer.md`): map view of vessel tracks, an incident list, and a per-vessel drill-down.
+The real analyst dashboard (plan 02). Vanilla JS, no build step. Start from `site/console.html`
+and its scripts, set `source: "live"` in `config.js`, and swap the SVG map module for MapLibre GL
+(loaded from a script tag) once the base-map tile source is decided. Not started.

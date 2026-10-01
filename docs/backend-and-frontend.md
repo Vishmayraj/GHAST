@@ -17,25 +17,11 @@ So today:
 
 ## Frontend
 
-`frontend/site/` is a static site: four HTML pages (`index`, `about`, `approach`, `platform`), CSS, and small scripts. No framework and no build step. `frontend/Dockerfile` copies the directory into `nginx:1.27-alpine`; the compose `frontend` service publishes it on `${FRONTEND_PORT:-3000}`. `frontend/dashboard/` is an empty directory with a README describing a React and MapLibre analyst dashboard that has not been started.
+`frontend/site/` is a static site: five HTML pages (`index`, `how-it-works`, `console`, `trust`, `project`), CSS and small scripts. No framework and no build step. `frontend/Dockerfile` copies the directory into `nginx:1.27-alpine`; the compose `frontend` service publishes it on `${FRONTEND_PORT:-3000}`. `frontend/dashboard/` is an empty directory.
 
-What the site shows:
+All data goes through one facade, `GHAST.data` (`scripts/data/api.js`), which resolves to `sample.js` or `live.js` from `scripts/config.js`. Sample is the default. `live.js` calls the plan 02 endpoints, which do not exist yet, so live mode shows error states. The console and trust pages show sample data with a visible tag. See `frontend/site/README.md` for the module slots and which backend plan fills each.
 
-- `index.html`: a hero whose video (`assets/ghast-hero.mp4`, `.webm`) is scrubbed by scroll position (`scroll-hero.js`), then short teaser sections.
-- `about.html`, `approach.html`, `platform.html`: explanatory copy plus a few rendered widgets: an incident card with an agent trace, two fleet maps (isolated versus widespread anomaly), a deviation-over-time chart, and an incident feed list. All of these are drawn by `sections.js` and `charts.js` from `window.GHAST_MOCK` in `scripts/mock-data.js`.
-
-How data gets to it: it does not. There is no `fetch`, WebSocket or API call in any script. `mock-data.js` is a hardcoded object whose header says it is illustrative and shaped like a future API response. The site's README describes replacing that file with a `fetch("/api/...")`. No such endpoint exists to fetch from.
-
-Live versus historical behavior: none. The page shows no data from the database, live or historical. The compose `depends_on: ingestion` for the frontend service has no functional effect.
-
-What the mock data depicts, so nobody mistakes it for output:
-
-- A vessel named "MV KESTREL BAY" flagged as `targeted_spoof` at 0.81 confidence, with evidence text that includes a "DBSCAN fleet-wide check" and "6 known jamming/spoofing zones on file". Neither exists: fleet-wide DBSCAN clustering is a Stage 2 item (`ml/models/clustering/` is a README), and the zones table is empty.
-- Deviation values in meters. The real detector's error is in degrees of latitude and longitude, and there is no meter conversion anywhere.
-- Incident feed statuses such as "Auto-dismissed" and "Report generated". The real statuses are `reported` and `escalated`, plus `resolved` once an analyst records a verdict with `agent/review.py`; nothing is auto-dismissed.
-- Its hypotheses list "Area jamming" and "Equipment fault" alongside targeted spoof. `freeze_replay`, a real hypothesis the agent produces, does not appear.
-
-The site's page copy describes the approach in product terms. Statements there about detection, fleet differentiation and the analyst desk are marketing narrative about the intended platform and were not checked against the code beyond the mock data above. Treat the site as a design artifact, not documentation of the system.
+Treat the site as a design artifact, not documentation of the system.
 
 ## Status
 
@@ -43,7 +29,7 @@ The site's page copy describes the approach in product terms. Statements there a
 |---|---|
 | database schema | implemented (`backend/models/schema.sql`) |
 | FastAPI app, endpoints, auth | not implemented, README only |
-| landing site | implemented, static, mock data only |
+| site and console sample | implemented, static, sample data behind a data facade |
 | analyst dashboard | not started |
 | any connection between UI and data | none |
 | what would need to exist first | an API over `incidents` and `vessel_position` that the mock shape can be swapped for |

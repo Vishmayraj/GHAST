@@ -1,10 +1,6 @@
 # frontend/
 
-The delivery layer's user-facing surfaces.
+The user-facing surfaces.
 
-- `site/` — the public landing site: the project's cinematic scroll-driven
-  introduction and explainer, including its own `assets/` (the hero video).
-  Vanilla HTML/CSS/JS, no build step. See `site/README.md` for structure and
-  how mock data is organized so the real backend can replace it cleanly.
-- `dashboard/` — the analyst dashboard (Stage 1 scope, per the HLD/MIP):
-  map view, incident list, per-vessel drill-down. Not yet started.
+- `site/`: the public site and the analyst console sample. Vanilla HTML, CSS and JS, no build step. See `site/README.md`.
+- `dashboard/`: the real analyst dashboard (plan 02). It stays vanilla JS and reuses the console page and its modules from `site/`, pointed at the API with `source: "live"`. Not started.
