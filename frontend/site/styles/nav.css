@@ -1,105 +1,32 @@
-/* Fixed top nav — deep navy, translucent, legible over both the
-   dark hero video and light page backgrounds without needing
-   scroll-based JS to swap states. */
-
-.site-nav {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 50;
-  height: var(--nav-height);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-6);
-  background: rgba(6, 27, 42, 0.82);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--color-border-on-navy);
+.header {
+  position: sticky; top: 0; z-index: 50; height: var(--header-h);
+  background: var(--paper); border-bottom: 1px solid var(--rule); color: var(--ink);
 }
-
-.site-nav__inner {
-  width: 100%;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-6);
+.header__in {
+  height: 100%; max-width: var(--col-max); margin: 0 auto; padding: 0 var(--gutter);
+  display: flex; align-items: center; justify-content: space-between;
 }
+.mark { display: flex; align-items: center; gap: 0.75rem; text-decoration: none; font-weight: 500; letter-spacing: 0.12em; }
+.mark svg { width: 28px; height: 24px; }
+.header__links { display: flex; gap: 2.5rem; font-size: var(--fs-small); }
+.header__links a { text-decoration: none; padding: 0.25rem 0; }
+.header__links a:hover, .header__links a[aria-current="page"] { text-decoration: underline; }
+.header__menu { display: none; background: none; border: 0; cursor: pointer; font-size: var(--fs-small); padding: 0.5rem 0; }
 
-.site-nav__brand {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 1.0625rem;
-  color: var(--paper);
-  text-decoration: none;
-  letter-spacing: -0.01em;
-}
-
-.site-nav__brand-mark {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--c-ocean);
-  box-shadow: 0 0 0 3px rgba(0, 150, 199, 0.25);
-}
-
-.site-nav__links {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.site-nav__links a {
-  font-size: 0.9375rem;
-  color: var(--color-text-on-navy-muted);
-  text-decoration: none;
-  padding: var(--space-2) 0;
-  border-bottom: 1px solid transparent;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
-}
-
-.site-nav__links a:hover,
-.site-nav__links a[aria-current="page"] {
-  color: var(--paper);
-  border-bottom-color: var(--c-ocean);
-}
-
-.site-nav__cta {
-  font-family: var(--font-mono);
-  font-size: var(--step-ticker);
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-border-on-navy);
-  border-radius: 999px;
-  color: var(--paper);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.site-nav__cta:hover {
-  border-color: var(--c-ocean);
-  color: var(--c-ocean);
-}
+/* over the hero: transparent, paper text */
+.header[data-theme="hero"] { position: fixed; left: 0; right: 0; background: transparent; border-color: transparent; color: var(--paper); }
+.header { transition: background 200ms, color 200ms, border-color 200ms; }
 
 @media (max-width: 720px) {
-  .site-nav__links {
-    gap: var(--space-4);
+  .header__links {
+    position: absolute; top: var(--header-h); left: 0; right: 0; flex-direction: column; gap: 0;
+    background: var(--paper); color: var(--ink); border-bottom: 1px solid var(--rule);
+    padding: 1rem var(--gutter) 2rem; font: 400 2rem/1.4 var(--font-serif);
+    opacity: 0; visibility: hidden; transition: opacity 200ms, visibility 200ms;
   }
-
-  .site-nav__cta {
-    display: none;
-  }
+  .header__links[data-open="true"] { opacity: 1; visibility: visible; }
+  .header__menu { display: block; color: inherit; }
 }
 
-@media (max-width: 560px) {
-  .site-nav__links a:not([aria-current]) {
-    display: none;
-  }
-}
+.footer { border-top: 1px solid var(--rule); padding: 4rem 0; }
+.footer__in { display: flex; justify-content: space-between; gap: 2rem; flex-wrap: wrap; color: var(--ink-3); font-size: var(--fs-small); }

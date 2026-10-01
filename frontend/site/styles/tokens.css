@@ -1,101 +1,29 @@
-/*
- * Design tokens for the GHAST site.
- *
- * Exactly two colors: white, and one dark shade of blue, used at
- * different depths (tints toward white, shades toward navy) for
- * structure and text. There is no third hue anywhere, including for
- * alerts — a flagged anomaly is distinguished by weight, contrast,
- * and an outline, not by a different color.
- *
- * Type is two families: Instrument Sans carries everything (body,
- * UI, headings), and Instrument Serif italic is reserved for one
- * word or a short literary passage, used sparingly, never for body
- * text. A system monospace stack (no webfont) handles small numeric
- * readouts like MMSI and timestamps, which is a practical exception,
- * not a third brand typeface.
- */
-
+/* GHAST design tokens. Paper, ink, fine rules, one signal color. */
 :root {
-  /* The two colors */
-  --c-blue: #1f4e79;
-  --c-navy: #0a2036;
-  --c-white: #ffffff;
-  --c-black: #0a0a0a;
+  --paper: #f5f2eb;
+  --paper-deep: #ece8de;
+  --ink: #0a2036;
+  --ink-2: #3a4a5c;
+  --ink-3: #5a6674;
+  --rule: rgba(10, 32, 54, 0.14);
+  --sea: #1f4e79;
+  --sea-tint: #e3eaef;
+  --signal: #d8431f;
 
-  /* Blue tints/shades — blends of blue with white/navy only */
-  --ocean-100: #e4eaef;
-  --ocean-200: #c0cdd9;
-  --ocean-300: #8fa6bc;
-  --ocean-400: #5e809f;
-  --ocean-600: #194165;
-  --ocean-700: #143354;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
+  --font-sans: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Alias so the accent reads by its role, not the old hue name */
-  --c-ocean: var(--c-blue);
+  --fs-meta: 0.8125rem;
+  --fs-small: 0.9375rem;
+  --fs-body: 1.0625rem;
+  --fs-h3: 1.375rem;
+  --fs-h2: clamp(2rem, 1.5rem + 2.2vw, 3.25rem);
+  --fs-h1: clamp(2.75rem, 1.6rem + 5vw, 6rem);
 
-  /* Neutrals: navy blended toward white, nothing else */
-  --ink-900: var(--c-navy);
-  --ink-700: #28394a;
-  --ink-500: #52657a;
-  --ink-300: #94a3b3;
-  --ink-100: #dde3e9;
-  --paper: var(--c-white);
-  --paper-dim: #f3f5f7;
-
-  /* Semantic roles */
-  --color-bg: var(--paper);
-  --color-bg-inverse: var(--c-navy);
-  --color-surface: var(--c-white);
-  --color-text: var(--ink-900);
-  --color-text-muted: var(--ink-500);
-  --color-text-on-navy: var(--paper);
-  --color-text-on-navy-muted: var(--ocean-200);
-  --color-accent: var(--c-blue);
-  /* A flagged anomaly is the darkest point of the one blue, not a
-     different hue — contrast and weight carry the alert. */
-  --color-anomaly: var(--c-navy);
-  --color-border: rgba(10, 32, 54, 0.12);
-  --color-border-on-navy: rgba(255, 255, 255, 0.14);
-  --color-grid-line: rgba(31, 78, 121, 0.18);
-
-  /* Typography — Instrument Sans for everything, Instrument Serif
-     italic reserved for rare accent words and the literary interlude */
-  --font-sans: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: var(--font-sans);
-  --font-accent: "Instrument Serif", Georgia, serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-
-  --step-ticker: 0.6875rem;
-  --step-body: 1rem;
-  --step-lede: 1.1875rem;
-  --step-h3: 1.5rem;
-  --step-h2: clamp(1.75rem, 1.35rem + 2vw, 2.5rem);
-  --step-h1: clamp(2.25rem, 1.3rem + 4.5vw, 4.25rem);
-
-  --lh-tight: 1.08;
-  --lh-normal: 1.5;
-  --lh-loose: 1.7;
-
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --space-12: 3rem;
-  --space-16: 4rem;
-  --space-24: 6rem;
-  --space-32: 8rem;
-
-  --content-max: 1120px;
-  --content-narrow: 720px;
-  --radius-sm: 4px;
-  --radius-md: 10px;
-  --radius-lg: 18px;
-
-  --nav-height: 64px;
-
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-fast: 180ms;
-  --dur-med: 420ms;
+  --pad-section: clamp(6rem, 10vw, 11rem);
+  --gutter: 24px;
+  --col-max: 1200px;
+  --header-h: 72px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
 }
