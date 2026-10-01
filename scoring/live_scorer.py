@@ -277,6 +277,8 @@ def evaluate_window(
         latitude=float(latitude),
         longitude=float(longitude),
         detector_votes=votes,
+        window_start=window.timestamps[0],
+        window_end=window.timestamps[-1],
     )
 
 

@@ -116,6 +116,19 @@ async def test_high_prediction_error_triggers_investigation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_flag_carries_the_scored_window_bounds() -> None:
+    recorder = Recorder()
+    rows = make_rows(111)
+    scorer = build(FakeStore({111: rows}), errors_with(15, OPERATING_THRESHOLD * 50), recorder)
+
+    await scorer.poll_once()
+
+    anomaly = recorder.anomalies[0]
+    assert anomaly.window_start == rows[0]["received_at"]
+    assert anomaly.window_end == rows[-1]["received_at"]
+
+
+@pytest.mark.asyncio
 async def test_low_prediction_error_does_not_trigger() -> None:
     recorder = Recorder()
     scorer = build(FakeStore({111: make_rows(111)}), errors_with(15, OPERATING_THRESHOLD / 10), recorder)
