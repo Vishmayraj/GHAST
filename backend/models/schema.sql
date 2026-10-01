@@ -148,3 +148,79 @@ CREATE INDEX IF NOT EXISTS jamming_zones_geo_idx
     ON jamming_zones USING GIST (zone);
 CREATE INDEX IF NOT EXISTS jamming_zones_active_idx
     ON jamming_zones (active);
+
+-- ---------------------------------------------------------------------------------------
+-- Two-threshold alerting (plan 01 follow-up). Idempotent, like everything above.
+--
+-- threshold_a: a flag at or above it becomes an incident on the analyst console, where anyone
+--              can press a button to draft its report.
+-- threshold_b: (> threshold_a) a flag at or above it is also drafted automatically and sorted
+--              first in listings.
+-- The threshold agent (agent/threshold_agent) writes a row whenever it changes them, because
+-- both depend on the Laya/BiLSTM checkpoint in use and move every time the model is
+-- fine-tuned. The newest row is the active one; older rows are the history.
+CREATE TABLE IF NOT EXISTS threshold_config (
+    id             BIGSERIAL PRIMARY KEY,
+    threshold_a    DOUBLE PRECISION NOT NULL CHECK (threshold_a > 0),
+    threshold_b    DOUBLE PRECISION NOT NULL,
+    model_version  TEXT,
+    set_by         TEXT NOT NULL DEFAULT 'manual' CHECK (set_by IN ('manual', 'agent', 'default')),
+    reason         TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (threshold_b > threshold_a)
+);
+CREATE INDEX IF NOT EXISTS threshold_config_latest_idx ON threshold_config (created_at DESC);
+
+-- One row per scorer cycle: how many new reports were scored, how many were skipped as
+-- unscorable (agent/../ml/features/quality.py), and a log-spaced histogram of prediction errors
+-- so the flag rate at ANY candidate threshold can be computed later without keeping a row per
+-- report. Edges are fixed in code (scoring/score_stats.py::HISTOGRAM_EDGES).
+CREATE TABLE IF NOT EXISTS scoring_stats (
+    id                  BIGSERIAL PRIMARY KEY,
+    scored_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    model_version       TEXT,
+    reports_scored      INTEGER NOT NULL,
+    skipped_unscorable  INTEGER NOT NULL DEFAULT 0,
+    flagged_a           INTEGER NOT NULL DEFAULT 0,
+    flagged_b           INTEGER NOT NULL DEFAULT 0,
+    histogram           JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS scoring_stats_time_idx ON scoring_stats (scored_at DESC);
+
+-- Audit trail for every agent decision: the task, each tool call and result, the decision,
+-- and whether the LLM or the deterministic fallback made it (agent/runtime/agent.py).
+CREATE TABLE IF NOT EXISTS agent_runs (
+    id           BIGSERIAL PRIMARY KEY,
+    agent        TEXT NOT NULL,
+    mode         TEXT NOT NULL CHECK (mode IN ('llm', 'fallback')),
+    task         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    steps        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    decision     JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reason       TEXT,
+    incident_id  UUID,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS agent_runs_agent_time_idx ON agent_runs (agent, created_at DESC);
+CREATE INDEX IF NOT EXISTS agent_runs_incident_idx ON agent_runs (incident_id) WHERE incident_id IS NOT NULL;
+
+-- Incident tier and report lifecycle. Incidents and raw positions are kept forever (data for
+-- later training); only the drafted report text expires.
+--   tier 'A'  shown on the console, report on request
+--   tier 'B'  report drafted automatically, listed first
+--   priority  set by the triage agent within a tier (higher = look first)
+--   report_expires_at  24 hours after the draft; the retention job clears report_text then
+--   report_deleted_at  set when an analyst deletes a report on purpose; the same column is set
+--                      by expiry, report_delete_reason says which ('analyst' or 'expired').
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'A' CHECK (tier IN ('A', 'B'));
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS priority DOUBLE PRECISION;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_auto BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_expires_at TIMESTAMPTZ;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_deleted_at TIMESTAMPTZ;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_delete_reason TEXT
+    CHECK (report_delete_reason IN ('analyst', 'expired'));
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS challenge JSONB;
+
+CREATE INDEX IF NOT EXISTS incidents_console_idx
+    ON incidents (tier DESC, priority DESC NULLS LAST, flagged_at DESC) WHERE review_verdict IS NULL;
+CREATE INDEX IF NOT EXISTS incidents_report_expiry_idx
+    ON incidents (report_expires_at) WHERE report_text IS NOT NULL;
