@@ -1,5 +1,4 @@
 /* The flow: one line top to bottom. Each point fades in and out; the page shifts white to black. */
-.flow-page *, .flow-page *::before { transition: color 350ms, background-color 350ms, border-color 350ms, stroke 350ms, fill 350ms; }
 .flow-page { background: var(--paper); color: var(--ink); }
 .flow { position: relative; padding: 2rem 0 4rem; }
 .flow__line { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--rule); }
@@ -19,15 +18,17 @@
 .pt--R .pt__text { grid-column: 2; --tx: 50px; }
 .pt--R .pt__vis { grid-column: 1; grid-row: 1; justify-self: end; --tx: -50px; }
 .pt--C { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 2rem; }
-.pt--C .pt__text { --tx: 0px; background: var(--paper); padding: 1rem 2rem; position: relative; z-index: 1; }
+.pt--C .pt__text { --tx: 0px; padding: 1rem 2rem; position: relative; z-index: 3; }
+.pt--C::before { content: ""; position: absolute; left: 50%; top: 24%; bottom: 24%; width: min(94%, 980px); transform: translateX(-50%); background: var(--paper); z-index: 1; }
+.pt--C .pt__node { top: 9%; }
 .pt--C p { margin-left: auto; margin-right: auto; }
 .pt--C .pt__vis { display: none; }
 .pt--C h2 { font-size: clamp(2.75rem, 1.5rem + 5vw, 6rem); }
 .sv { fill: none; stroke: var(--ink); stroke-width: 2; }
 .sv-dim { fill: none; stroke: var(--ink-3); stroke-width: 2; }
 .sv-fill { fill: var(--ink); }
-.sv-sig { fill: #d8431f; }
-.sv-sig-line { fill: none; stroke: #d8431f; stroke-width: 1.5; }
+.sv-sig, .sig { fill: var(--signal); }
+.sv-sig-line { fill: none; stroke: var(--signal); stroke-width: 1.5; }
 .fade-in { opacity: 0; transition: opacity 900ms var(--ease) var(--d, 0ms); }
 .is-active .fade-in { opacity: 1; }
 .agent-lines li { padding: 0.5rem 0; border-top: 1px solid var(--rule); clip-path: inset(0 100% 0 0); transition: clip-path 900ms var(--ease-io) var(--d, 0ms); font-family: var(--font-mono); font-size: 1rem; }
@@ -47,7 +48,9 @@
   .pt--L .pt__vis, .pt--R .pt__vis { grid-column: 1; grid-row: auto; justify-self: start; --tx: 30px; }
   .pt--C { text-align: left; justify-items: start; }
   .pt--C p { margin-left: 0; }
-  .pt--C .pt__text { padding: 0; background: none; }
+  .pt--C .pt__text { padding: 0; }
+  .pt--C::before { display: none; }
+  .pt--C .pt__node { top: 50%; }
   .pt--end .links { justify-content: flex-start; }
 }
 @media (prefers-reduced-motion: reduce) {

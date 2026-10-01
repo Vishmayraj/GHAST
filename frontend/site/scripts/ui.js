@@ -32,7 +32,7 @@
     }
     kids.forEach(function (n) {
       if (n.nodeType === 3) n.textContent.split(/\s+/).filter(Boolean).forEach(function (t) { word(document.createTextNode(t)); });
-      else word(n);
+      else if (n.nodeType === 1) n.textContent.split(/\s+/).filter(Boolean).forEach(function (t) { var c = n.cloneNode(false); c.textContent = t; word(c); });
     });
   });
 

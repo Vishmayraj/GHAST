@@ -54,6 +54,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 }
 
 .script { font-family: var(--font-script); font-weight: 400; font-size: 1.35em; letter-spacing: 0; line-height: 0.8; }
+kbd { font: 500 0.875rem var(--font-mono); border: 1px solid var(--rule); border-bottom-width: 2px; border-radius: 3px; padding: 0.05rem 0.4rem; }
 .right { text-align: right; }
 .right p, .right h2, .right h3 { margin-left: auto; }
 
@@ -64,7 +65,7 @@ html { scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
 [data-reveal="scale"] { transform: scale(0.94); }
 [data-reveal].is-visible, [data-stagger].is-visible > *, .no-js [data-reveal], .no-js [data-stagger] > * { opacity: 1; transform: none; }
 /* headline words rise out of a mask */
-.w { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.12em; margin-bottom: -0.12em; }
+.w { display: inline-block; overflow: hidden; vertical-align: top; padding: 0.35em 0.5em 0.45em; margin: -0.35em -0.5em -0.45em; }
 .w > span { display: inline-block; transform: translateY(110%); transition: transform 900ms var(--ease); transition-delay: var(--d, 0ms); }
 .is-visible .w > span, .no-js .w > span { transform: none; }
 /* svg drawing */
