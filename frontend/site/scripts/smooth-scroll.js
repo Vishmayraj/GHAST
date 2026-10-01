@@ -4,7 +4,7 @@
   if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   if (window.matchMedia("(pointer: coarse)").matches) return;
   var root = document.documentElement, cur = window.scrollY, target = cur, raf = 0, own = false;
-  var EASE = 0.085;
+  var EASE = 0.048;
   root.style.scrollBehavior = "auto";
   function max() { return root.scrollHeight - window.innerHeight; }
   function tick() {
