@@ -13,6 +13,7 @@ Start with `architecture.md`. It links to the rest:
 - `laya_pattern_classifier.md`: Laya review queue and labeled export, model, use in the agent
 - `backend-and-frontend.md`: what exists (little)
 - `testing.md`: test map and CI
+- `frontend/`: the site's design system (`DESIGN.md`) and the handover guide (`README.md`)
 - `hld-vs-current.md`: the HLD compared with the current docs, and what is missing
 - `DEVELOPER_GUIDE.md`: older recovery guide
 

@@ -21,7 +21,7 @@ So today:
 
 All data goes through one facade, `GHAST.data` (`scripts/data/api.js`), which resolves to `sample.js` or `live.js` from `scripts/config.js`. Sample is the default. `live.js` calls the plan 02 endpoints, which do not exist yet, so live mode shows error states. The console and trust pages show sample data with a visible tag. See `frontend/site/README.md` for the module slots and which backend plan fills each.
 
-Treat the site as a design artifact, not documentation of the system.
+Treat the site as a design artifact, not documentation of the system. Design rules and the handover guide are in `docs/frontend/` (`DESIGN.md` and `README.md`).
 
 ## Status
 

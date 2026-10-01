@@ -1,5 +1,7 @@
 # frontend/site/
 
+Design rules and the handover guide are in `docs/frontend/`. This file is the file map.
+
 The public GHAST site and the analyst console sample. Plain HTML, CSS and
 JS, no build step, no framework. `assets/` lives inside `site/` so anything
 that serves this directory (`frontend/Dockerfile`, a static host, a CDN)
@@ -9,13 +11,13 @@ gets the hero video with no extra copy step.
 
 ```
 site/
-  index.html              home: hero, statement, four routes
+  index.html              home: hero, statement, playground, four routes
   flow.html               one line top to bottom; points fade in and out; page goes white to black
   how-it-works.html       predict, place it, investigate, decide
   console.html            analyst console on sample data (the dashboard spec)
   trust.html              alert budget, review loop, review statistics
   project.html            what GHAST is and where it stands
-  assets/ghast-hero.mp4 / .webm
+  assets/ghast-hero.mp4 / .webm, og-image.jpg, favicon.svg
   styles/
     tokens.css            white, ink, rules, one signal color; Newsreader, Geist, Geist Mono, Pinyon Script accents
     base.css              reset, layout, buttons, reveal, browser surfaces
@@ -23,7 +25,7 @@ site/
     hero.css              scroll-scrubbed hero (home only)
     pages.css             routes, steps, tables, shared patterns
     console.css           console layout
-    flow.css              the flow page
+    flow.css              the Flow page
   scripts/
     config.js             source: "sample" or "live", apiBase, apiKey
     data/api.js           window.GHAST.data, the only thing UI code calls
@@ -34,6 +36,7 @@ site/
     scroll-hero.js        two-phase scroll-scrub (home only)
     ui.js                 header theme, mobile menu, split headlines, reveals, staggers
     smooth-scroll.js      inertial wheel scrolling (off for touch and reduced motion)
+    playground.js         home page "Try to fool it" illustration
     flow.js               flow page: line fill, point fades, white to black shift
 ```
 
