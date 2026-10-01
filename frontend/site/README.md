@@ -9,19 +9,21 @@ gets the hero video with no extra copy step.
 
 ```
 site/
-  index.html              home: hero, statement, three routes
+  index.html              home: hero, statement, four routes
+  flow.html               one line top to bottom; points fade in and out; page goes white to black
   how-it-works.html       predict, place it, investigate, decide
   console.html            analyst console on sample data (the dashboard spec)
   trust.html              alert budget, review loop, review statistics
   project.html            what GHAST is and where it stands
   assets/ghast-hero.mp4 / .webm
   styles/
-    tokens.css            paper, ink, rules, one signal color; Newsreader, Geist, Geist Mono
+    tokens.css            white, ink, rules, one signal color; Newsreader, Geist, Geist Mono, Pinyon Script accents
     base.css              reset, layout, buttons, reveal, browser surfaces
     nav.css               header, mobile menu, footer
     hero.css              scroll-scrubbed hero (home only)
     pages.css             routes, steps, tables, shared patterns
     console.css           console layout
+    flow.css              the flow page
   scripts/
     config.js             source: "sample" or "live", apiBase, apiKey
     data/api.js           window.GHAST.data, the only thing UI code calls
@@ -30,7 +32,9 @@ site/
     console.js            console modules
     trust.js              trust modules
     scroll-hero.js        two-phase scroll-scrub (home only)
-    ui.js                 header theme over the hero, mobile menu, reveals
+    ui.js                 header theme, mobile menu, split headlines, reveals, staggers
+    smooth-scroll.js      inertial wheel scrolling (off for touch and reduced motion)
+    flow.js               flow page: line fill, point fades, white to black shift
 ```
 
 The pages are plain static HTML. Fonts load from Google Fonts with real

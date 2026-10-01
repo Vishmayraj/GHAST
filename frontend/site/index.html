@@ -7,7 +7,7 @@
   <meta name="description" content="GHAST watches vessel position reports, flags the ones that do not add up, and shows an analyst why." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400&family=Pinyon+Script&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/base.css" />
   <link rel="stylesheet" href="styles/nav.css" />
@@ -16,7 +16,7 @@
   <script>document.documentElement.classList.remove("no-js");</script>
 </head>
 <body>
-<header class="header"><div class="header__in"><a class="mark" href="index.html" aria-label="GHAST home"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 17H12"/><path d="M19 10v4" stroke-dasharray="1.5 2"/><circle cx="19" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5" fill="currentColor"/></svg><span>GHAST</span></a><button class="header__menu" aria-expanded="false" aria-controls="nav-links">Menu</button><nav class="header__links" id="nav-links" aria-label="Primary" data-open="false"><a href="how-it-works.html">How it works</a><a href="console.html">Console</a><a href="trust.html">Trust</a><a href="project.html">Project</a><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></nav></div></header>
+<header class="header"><div class="header__in"><a class="mark" href="index.html" aria-label="GHAST home"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 17H12"/><path d="M19 10v4" stroke-dasharray="1.5 2"/><circle cx="19" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5" fill="currentColor"/></svg><span>GHAST</span></a><button class="header__menu" aria-expanded="false" aria-controls="nav-links">Menu</button><nav class="header__links" id="nav-links" aria-label="Primary" data-open="false"><a href="flow.html">The flow</a><a href="how-it-works.html">How it works</a><a href="console.html">Console</a><a href="trust.html">Trust</a><a href="project.html">Project</a><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></nav></div></header>
 <section class="hero" data-hero aria-label="GHAST introduction">
   <div class="hero__sticky">
     <video class="hero__video" data-hero-video muted playsinline preload="auto" aria-hidden="true">
@@ -33,14 +33,15 @@
 </section>
 <div class="hero__end" data-hero-end></div><main>
 <section class="section" data-reveal><div class="wrap split">
-  <h2>A ship reports where it is. GHAST checks whether that is possible.</h2>
-  <div>
+  <h2 data-split>A ship reports where it is. GHAST checks whether that is <span class="script">possible.</span></h2>
+  <div data-stagger>
     <p>Every vessel broadcasts its position, speed and course. When that signal is jammed or faked, the numbers stop fitting together: a turn too sharp for the hull, a jump with no time to make it, a position frozen while the speed says the ship is moving.</p>
     <p>GHAST learns how each vessel normally moves and flags the reports that break from it. Then it gathers the evidence, says what it thinks happened and how sure it is, and leaves the decision to a person.</p>
   </div>
 </div></section>
-<section class="section" data-reveal><div class="wrap">
-  <ul class="routes">
+<section class="section"><div class="wrap">
+  <ul class="routes" data-stagger>
+    <li><a href="flow.html"><h3>The flow</h3><p>Follow one position report from the ship to a decision.</p></a></li>
     <li><a href="how-it-works.html"><h3>How it works</h3><p>How one odd position becomes a flag, then a hypothesis, then a decision.</p></a></li>
     <li><a href="console.html"><h3>Console</h3><p>Open a sample incident and work it the way an analyst would.</p></a></li>
     <li><a href="trust.html"><h3>Trust</h3><p>How often GHAST is right, and how that gets measured.</p></a></li>
@@ -49,6 +50,7 @@
 </main>
 <footer class="footer"><div class="wrap footer__in"><span>GHAST. GNSS and AIS Hazardous Spoofing Tracker.</span><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></div></footer>
   <script src="scripts/scroll-hero.js"></script>
+  <script src="scripts/smooth-scroll.js"></script>
   <script src="scripts/ui.js"></script>
   
 </body>
