@@ -1,10 +1,11 @@
 """Laya pattern classifier: a fourth, independent evidence source for `investigate()`.
 
-BigPass plan section 6. The model is a Laya `choice` head fine-tuned on the injector's own
-labelled windows (ml/evaluation/laya_export.py) and asked which of five classes a flagged
-20-report window looks like: normal_track, teleport_jump, gradual_drift, freeze_replay,
-impossible_kinematics. Its input is the text from features.summary.summarize_rows, the exact
-function the training export uses.
+The model is a Laya `choice` head asked which of five classes a flagged 20-report window
+looks like: normal_track, teleport_jump, gradual_drift, freeze_replay, impossible_kinematics.
+Its input is the text from features.summary.summarize_rows, the exact function the
+training export (ml/evaluation/laya_export.py) uses. The checkpoint currently in use was
+fine-tuned on injected windows that have since been removed from the repo; retraining is
+meant to use analyst-labelled real windows (ImplementationPlans/04_Laya_Real_Labels.md).
 
 This is the one external dependency in the agent, so it is isolated on purpose:
 
@@ -13,8 +14,8 @@ This is the one external dependency in the agent, so it is isolated on purpose:
   carries on exactly as it did before this tool existed. It never raises into `investigate`.
 * The `laya` import happens inside `load_laya_predictor`, never at module import, so the
   agent's test suite and CI need neither Laya, transformers, nor torch.
-* Until a checkpoint has been fine-tuned AND evaluated on the exporter's holdout split,
-  nothing here has been measured. `form_hypothesis` therefore only lets this vote lift or
+* Until a checkpoint has been fine-tuned AND evaluated on analyst-labelled real windows,
+  nothing here has been measured on real spoofing. `form_hypothesis` therefore only lets this vote lift or
   apply a confidence cap; it never decides a hypothesis on its own. See state_machine.py.
 """
 from __future__ import annotations

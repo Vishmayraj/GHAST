@@ -1,6 +1,6 @@
 """Live scoring service: poll new AIS reports, score them, hand real flags to the agent.
 
-Glue only, no new modeling (ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md
+Glue only, no new modeling (ImplementationPlans/old/Sem5_BigPass_LiveScoring_And_Laya.md
 section 4). For each vessel with new live reports it:
 
   1. pulls the vessel's most recent WINDOW_LENGTH reports and builds a FeatureWindow with
@@ -209,8 +209,7 @@ def _implied_acceleration(features: np.ndarray) -> list[float | None]:
 def window_observations(window: FeatureWindow, errors: np.ndarray) -> list[AISObservation]:
     """Flatten a scored window into the AISObservation shape the detectors consume.
 
-    Mirrors evaluation/score_checkpoint.py::score_injected_windows for live data: no
-    label (`is_spoofed` is a placeholder, never read by a detector) and no pattern.
+    Real reports carry no label: `is_spoofed` is a placeholder that no detector reads.
     """
     accelerations = _implied_acceleration(window.features)
     observations: list[AISObservation] = []
@@ -229,7 +228,6 @@ def window_observations(window: FeatureWindow, errors: np.ndarray) -> list[AISOb
             prediction_error=float(errors[index]),
             acceleration=accelerations[index],
             implied_speed=float(row_features[IMPLIED_SPEED_INDEX]),
-            pattern=None,
             source="live",
         ))
     return observations

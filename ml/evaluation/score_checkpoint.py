@@ -1,36 +1,42 @@
-"""Score a trained BiLSTM checkpoint against a held-out injected-synthetic eval set.
+"""Score a trained BiLSTM checkpoint on real, unlabeled AIS windows from the database.
 
-This is the wire nothing else in the repo has ever made: it connects
-ml/models/bilstm/infer.py::prediction_errors() (the scoring function) to
-ml/evaluation/harness.py::evaluate() (the precision/recall/F1 harness). See
-ImplementationPlans/Sem5_Evaluation_And_Threshold.md for the full brief, including why
-this deliberately stops short of a live scoring service, agent wiring, or Laya
-integration.
+There is no synthetic spoofing here. Windows come straight from `vessel_position`
+(live or historical rows), the checkpoint scores every report, and the script prints
+what the detectors do on that real traffic:
 
-This never goes through harness.py's own CLI (main()): that CLI calls every
-registered dataset loader as `load(path)`, which matches the synchronous file
-loaders but not `load_injected_synthetic`'s async, multi-argument signature (see
-harness.py::main and section 1 of the implementation plan). This script does its own
-async data loading and model inference in front of `evaluate()`, and never touches
-harness.py's CLI wrapper; `--dataset gps_spoofing_mass` there keeps working exactly
-as before.
+* the prediction-error distribution (percentiles),
+* how often each detector votes, and how often two or more agree,
+* the flag rate at the current `OPERATING_THRESHOLD`,
+* the threshold that would give a chosen flag rate (calibration by alert budget),
+* the same flag rates split into underway and stationary windows.
+
+Real data has no ground-truth labels, so this reports rates, not precision, recall or
+F1. On traffic where real spoofing is rare, the flag rate is an upper bound on the false
+positive rate. It is not a detection score. Detection quality only becomes measurable
+once analyst-reviewed incidents exist (ImplementationPlans/01_Trust_Pass.md). The one
+labeled dataset in the repo is the public gps_spoofing_mass file, scored through
+`evaluation.harness`.
 
 Usage:
     cd ml
     python -m evaluation.score_checkpoint \\
         --dsn postgresql://ghast:ghast@localhost:5432/ghast \\
         --checkpoint checkpoints/epoch_010.pt \\
-        --eval-start 2026-05-01 --eval-end 2026-05-16 \\
-        --seed 0
+        --source historical --eval-start 2026-04-01 --eval-end 2026-04-16 \\
+        --out reports/historical_epoch_010.json
 
-Pick --eval-start/--eval-end so the range is disjoint from whatever range trained the
-checkpoint (the historical run used 2026-04-01..2026-04-16 - use a different April
-window, or a live window, so the eval set isn't windows the model already saw).
+Run it once per source (`--source historical`, then `--source live`) and compare the two
+reports: a threshold chosen on one source but flagging very differently on the other is
+the drift problem in docs/ml-pipeline.md, now visible as numbers.
+
+By default only validation vessels (the hash split training used) are scored, so the
+model has not trained on them. Pass `--include-training-vessels` to score everything.
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -40,35 +46,29 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from evaluation.baselines import Detector, freeze_replay_detector, prediction_error_detector, speed_jump_detector
-from features.inject import SPOOF_PATTERNS
-from evaluation.datasets import AISObservation
-from evaluation.harness import EvaluationResult, evaluate
-from features.extract import COG_INDEX, HEADING_INDEX, IMPLIED_SPEED_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX
-from features.inject import InjectedWindow, build_synthetic_dataset
-from features.pipeline import TrainingDataSource, stream_feature_windows
+from features.extract import (
+    FREEZE_DISPLACEMENT_EPSILON_KNOTS, IMPLIED_SPEED_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX,
+)
+from features.pipeline import FeatureWindow, TrainingDataSource, stream_feature_windows
 from models.bilstm.infer import prediction_errors_batch
 from models.bilstm.model import BiLSTMNextDelta
+from models.bilstm.threshold import OPERATING_THRESHOLD
 from training.dataset_cache import is_validation_vessel
 
-DEFAULT_SEED = 0
 DEFAULT_MLFLOW_TRACKING_URI = "sqlite:///mlruns/mlflow.db"
-DEFAULT_EXPERIMENT_NAME = "bilstm-checkpoint-scoring"
-CONTROL_LABEL = "control"  # display name for InjectedWindow.pattern is None
-THRESHOLD_SWEEP_POINTS = 25
+DEFAULT_EXPERIMENT_NAME = "bilstm-real-data-scoring"
 DEFAULT_EVAL_BATCH_SIZE = 1024
 PROFILE_EVERY_BATCHES = 10
 HOLDOUT_METHOD = "validation_vessel_split (fraction=0.2)"
-FREEZE_REPLAY_PATTERN_LABEL = "freeze_replay"
-assert FREEZE_REPLAY_PATTERN_LABEL in SPOOF_PATTERNS  # stay in sync with features.inject's own name
+ERROR_PERCENTILES = (50.0, 90.0, 95.0, 99.0, 99.9)
+TARGET_FLAG_RATES = (0.05, 0.01, 0.005, 0.001)
+# Same defaults the live scorer uses for its rule detectors (scoring/live_scorer.py).
+DEFAULT_FREEZE_REPLAY_THRESHOLD = 0.5
+UNDERWAY_KNOTS = 1.0  # a window is "underway" if any report implies more than this speed
 
 
 def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[BiLSTMNextDelta, dict]:
-    """Reconstruct the model architecture and load trained weights onto it.
-
-    Only `model_state` is used for scoring; `optimiser_state` is training-only and
-    the epoch/loss fields are kept just to log as provenance later.
-    """
+    """Reconstruct the model architecture and load trained weights onto it."""
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model = BiLSTMNextDelta(N_FEATURES).to(device)
     model.load_state_dict(checkpoint["model_state"])
@@ -76,193 +76,167 @@ def load_checkpoint(checkpoint_path: Path, device: torch.device) -> tuple[BiLSTM
     return model, checkpoint
 
 
-def _implied_acceleration(features: np.ndarray) -> list[float | None]:
-    """Per-timestep change in reported SOG - our own stand-in for the
-    acceleration/speed_calc columns the gps_spoofing_mass CSV ships pre-computed.
-
-    Nothing in the injected-synthetic pipeline computes this, but
-    speed_jump_detector (the existing baseline) needs some acceleration signal to
-    score on, so this gives it one on this dataset too. Not a label; purely a
-    derived feature for the baseline detector.
-    """
-    accelerations: list[float | None] = [None]
-    for index in range(1, len(features)):
-        previous_sog, current_sog = features[index - 1, SOG_INDEX], features[index, SOG_INDEX]
-        if previous_sog == MISSING_VALUE or current_sog == MISSING_VALUE:
-            accelerations.append(None)
-        else:
-            accelerations.append(float(current_sog - previous_sog))
-    return accelerations
-
-
-def score_injected_windows(model: BiLSTMNextDelta, injected_windows: list[InjectedWindow]) -> list[AISObservation]:
-    """Flatten scored windows into AISObservation rows.
-
-    Mirrors datasets.py::load_injected_synthetic's flattening shape, but sets
-    `prediction_error` to this model's real scored value (instead of leaving it
-    unset), carries `injected.pattern` through so later reporting can break
-    results out by spoof pattern without re-deriving it from window structure,
-    and also populates `implied_speed` (features.extract.IMPLIED_SPEED_INDEX) so
-    evaluation.baselines.freeze_replay_detector has the position-implied-motion
-    signal it needs alongside the vessel's own reported `sog`.
-    """
-    observations: list[AISObservation] = []
-    errors_per_window = prediction_errors_batch(model, [injected.window for injected in injected_windows])
-    for injected, errors in zip(injected_windows, errors_per_window, strict=True):
-        window = injected.window
-        accelerations = _implied_acceleration(window.features)
-        for index, is_spoofed in enumerate(injected.is_spoofed):
-            row_features = window.features[index]
-            latitude, longitude = window.positions[index]
-            observations.append(AISObservation(
-                mmsi=str(window.mmsi),
-                timestamp=window.timestamps[index].isoformat(),
-                latitude=float(latitude),
-                longitude=float(longitude),
-                sog=float(row_features[SOG_INDEX]),
-                cog=float(row_features[COG_INDEX]),
-                heading=float(row_features[HEADING_INDEX]),
-                is_spoofed=is_spoofed,
-                prediction_error=float(errors[index]),
-                acceleration=accelerations[index],
-                implied_speed=float(row_features[IMPLIED_SPEED_INDEX]),
-                pattern=injected.pattern,
-                source="injected_synthetic_scored",
-            ))
-    return observations
-
-
-def threshold_candidates(scores: list[float], n: int = THRESHOLD_SWEEP_POINTS) -> list[float]:
-    """Percentile-based sweep over the observed score distribution.
-
-    A trained model's prediction-error scale isn't knowable in advance, unlike a
-    hand-picked constant - so thresholds come from the data itself. Falls back to
-    a single 0.0 threshold on a degenerate all-zero distribution (e.g. a baseline
-    detector with no usable signal on this dataset) rather than erroring.
-    """
-    positive_scores = [score for score in scores if score > 0]
-    if not positive_scores:
-        return [0.0]
-    percentiles = np.linspace(1, 99.5, n)
-    candidates = sorted({float(np.percentile(positive_scores, p)) for p in percentiles})
-    return candidates or [0.0]
-
-
 @dataclass(frozen=True)
-class ThresholdSweep:
-    detector_name: str
-    results: list[EvaluationResult]
+class ReportScores:
+    """Flat per-report arrays for reports 1..19 of every scored window (report 0 has no error)."""
 
-    def best_by_f1(self) -> EvaluationResult:
-        return max(self.results, key=lambda result: result.metrics.f1)
+    errors: np.ndarray            # BiLSTM prediction error, degrees
+    sog: np.ndarray               # reported speed, NaN if missing
+    implied_speed: np.ndarray     # position-implied speed, NaN if missing
+    speed_change: np.ndarray      # |SOG - previous SOG|, NaN if either is missing
+    underway: np.ndarray          # bool, window-level: any report implies more than UNDERWAY_KNOTS
+    n_windows: int
 
-
-def sweep_thresholds(
-    observations: list[AISObservation], detector_name: str, detector: Detector, thresholds: list[float]
-) -> ThresholdSweep:
-    return ThresholdSweep(detector_name, [evaluate(observations, detector, threshold) for threshold in thresholds])
-
-
-def per_pattern_breakdown(
-    observations: list[AISObservation], detector: Detector, threshold: float
-) -> dict[str, EvaluationResult]:
-    """Precision/recall/F1 broken out per spoof pattern, plus a "control" group of
-    unmodified windows, so an aggregate F1 can't hide a bad false-positive rate on
-    ordinary, unremarkable maneuvers (see the implementation plan, section 2.5).
-    """
-    grouped: dict[str, list[AISObservation]] = {}
-    for observation in observations:
-        grouped.setdefault(observation.pattern or CONTROL_LABEL, []).append(observation)
-    return {pattern: evaluate(group, detector, threshold) for pattern, group in grouped.items()}
+    @property
+    def n_reports(self) -> int:
+        return int(self.errors.size)
 
 
-def _print_sweep(sweep: ThresholdSweep) -> None:
-    print(f"--- {sweep.detector_name} threshold sweep ({len(sweep.results)} thresholds) ---")
-    for result in sweep.results:
-        m = result.metrics
-        print(f"  threshold={result.threshold:.6f}  precision={m.precision:.3f}  recall={m.recall:.3f}  f1={m.f1:.3f}")
+def _nan_missing(values: np.ndarray) -> np.ndarray:
+    values = values.astype(np.float64)
+    values[values == MISSING_VALUE] = np.nan
+    return values
 
 
-def _print_breakdown(breakdown: dict[str, EvaluationResult], threshold: float) -> None:
-    print(f"--- per-pattern breakdown @ threshold={threshold:.6f} ---")
-    for pattern, result in sorted(breakdown.items()):
-        m = result.metrics
-        print(
-            f"  {pattern:<24} n={result.n_observations:<6} precision={m.precision:.3f}  recall={m.recall:.3f}  "
-            f"f1={m.f1:.3f}  fp={m.confusion.false_positive}  tp={m.confusion.true_positive}"
-        )
+def score_windows(model: BiLSTMNextDelta, windows: list[FeatureWindow]) -> ReportScores:
+    """Run the model on real windows and flatten to per-report arrays. No labels, no injection."""
+    errors_per_window = prediction_errors_batch(model, windows)
+    errors, sog, implied, change, underway = [], [], [], [], []
+    for window, window_errors in zip(windows, errors_per_window, strict=True):
+        features = window.features
+        window_sog = _nan_missing(features[:, SOG_INDEX])
+        window_implied = _nan_missing(features[:, IMPLIED_SPEED_INDEX])
+        errors.append(np.asarray(window_errors, dtype=np.float64)[1:])
+        sog.append(window_sog[1:])
+        implied.append(window_implied[1:])
+        change.append(np.abs(window_sog[1:] - window_sog[:-1]))
+        moving = bool(np.nanmax(window_implied, initial=0.0) > UNDERWAY_KNOTS)
+        underway.append(np.full(len(window_sog) - 1, moving))
+    return ReportScores(
+        np.concatenate(errors), np.concatenate(sog), np.concatenate(implied),
+        np.concatenate(change), np.concatenate(underway), len(windows),
+    )
 
 
-def _log_mlflow(
-    checkpoint_path: Path,
-    checkpoint: dict,
-    eval_start: datetime,
-    eval_end: datetime,
-    seed: int,
-    sweeps: dict[str, ThresholdSweep],
-    chosen: EvaluationResult,
-    baseline_best: EvaluationResult,
-    breakdown: dict[str, EvaluationResult],
-    source: TrainingDataSource,
-    holdout_windows: int,
-) -> None:
-    """One MLflow run per scoring pass: checkpoint identity, eval range, the full
-    sweep per detector, the chosen threshold, and the per-pattern breakdown.
-    """
+def merge_scores(parts: list[ReportScores]) -> ReportScores:
+    return ReportScores(
+        np.concatenate([p.errors for p in parts]), np.concatenate([p.sog for p in parts]),
+        np.concatenate([p.implied_speed for p in parts]), np.concatenate([p.speed_change for p in parts]),
+        np.concatenate([p.underway for p in parts]), sum(p.n_windows for p in parts),
+    )
+
+
+def freeze_replay_scores(sog: np.ndarray, implied_speed: np.ndarray) -> np.ndarray:
+    """Vectorised `evaluation.baselines.freeze_replay_detector`: reported speed minus
+    implied speed, only where the position implies (almost) no motion."""
+    valid = ~np.isnan(sog) & ~np.isnan(implied_speed) & (implied_speed >= 0) & (implied_speed <= FREEZE_DISPLACEMENT_EPSILON_KNOTS)
+    return np.where(valid, np.maximum(0.0, np.nan_to_num(sog) - np.nan_to_num(implied_speed)), 0.0)
+
+
+def speed_jump_scores(speed_change: np.ndarray) -> np.ndarray:
+    """Vectorised `evaluation.baselines.speed_jump_detector` over |SOG change|."""
+    return np.nan_to_num(speed_change, nan=0.0)
+
+
+def flag_rate(scores: np.ndarray, threshold: float) -> float:
+    return float(np.mean(scores > threshold)) if scores.size else 0.0
+
+
+def threshold_for_flag_rate(errors: np.ndarray, target_rate: float) -> float:
+    """The prediction-error threshold above which about `target_rate` of reports are flagged."""
+    if not 0.0 < target_rate < 1.0:
+        raise ValueError("target_rate must be between 0 and 1 (exclusive)")
+    if errors.size == 0:
+        raise ValueError("no scores to calibrate on")
+    return float(np.quantile(errors, 1.0 - target_rate))
+
+
+def build_report(
+    scores: ReportScores,
+    operating_threshold: float | None,
+    freeze_threshold: float = DEFAULT_FREEZE_REPLAY_THRESHOLD,
+    speed_jump_threshold: float | None = None,
+    target_flag_rates: tuple[float, ...] = TARGET_FLAG_RATES,
+) -> dict:
+    """Everything worth knowing about detector behaviour on this real traffic, as plain data."""
+    if scores.n_reports == 0:
+        raise ValueError("no scored reports")
+    freeze = freeze_replay_scores(scores.sog, scores.implied_speed)
+    votes = {}
+    vote_matrix = []
+    if operating_threshold is not None:
+        vote_matrix.append(scores.errors > operating_threshold)
+        votes["prediction_error"] = flag_rate(scores.errors, operating_threshold)
+    vote_matrix.append(freeze > freeze_threshold)
+    votes["freeze_replay"] = float(np.mean(vote_matrix[-1]))
+    if speed_jump_threshold is not None:
+        vote_matrix.append(speed_jump_scores(scores.speed_change) > speed_jump_threshold)
+        votes["speed_jump"] = float(np.mean(vote_matrix[-1]))
+    vote_count = np.sum(np.vstack(vote_matrix), axis=0)
+
+    by_motion = {}
+    for name, mask in (("underway", scores.underway), ("stationary", ~scores.underway)):
+        by_motion[name] = {
+            "reports": int(mask.sum()),
+            "prediction_error_flag_rate": flag_rate(scores.errors[mask], operating_threshold) if operating_threshold is not None and mask.any() else None,
+        }
+    return {
+        "windows": scores.n_windows,
+        "reports": scores.n_reports,
+        "error_percentiles": {f"p{p:g}": float(np.percentile(scores.errors, p)) for p in ERROR_PERCENTILES},
+        "operating_threshold": operating_threshold,
+        "flag_rate_at_operating_threshold": votes.get("prediction_error"),
+        "detector_vote_rates": votes,
+        "any_detector_flag_rate": float(np.mean(vote_count >= 1)),
+        "two_or_more_detectors_flag_rate": float(np.mean(vote_count >= 2)),
+        "by_motion": by_motion,
+        "threshold_for_flag_rate": {f"{rate:g}": threshold_for_flag_rate(scores.errors, rate) for rate in target_flag_rates},
+        "note": "Rates on real, unlabeled traffic. Where real spoofing is rare a flag rate is an upper bound on the false positive rate, not a detection score.",
+    }
+
+
+def print_report(report: dict) -> None:
+    print(f"\nscored {report['reports']:,} reports in {report['windows']:,} windows")
+    print("prediction error percentiles (degrees):")
+    for name, value in report["error_percentiles"].items():
+        print(f"  {name:<6} {value:.6f}")
+    print("detector vote rates (share of reports):")
+    for name, value in report["detector_vote_rates"].items():
+        print(f"  {name:<18} {value:.4%}")
+    print(f"  any detector       {report['any_detector_flag_rate']:.4%}")
+    print(f"  two or more agree  {report['two_or_more_detectors_flag_rate']:.4%}")
+    if report["operating_threshold"] is not None:
+        print(f"prediction-error flag rate at OPERATING_THRESHOLD={report['operating_threshold']}: {report['flag_rate_at_operating_threshold']:.4%}")
+        for name, row in report["by_motion"].items():
+            rate = row["prediction_error_flag_rate"]
+            print(f"  {name:<11} reports={row['reports']:>10,}  flag rate={'n/a' if rate is None else f'{rate:.4%}'}")
+    print("threshold that gives a target flag rate:")
+    for rate, threshold in report["threshold_for_flag_rate"].items():
+        print(f"  flag rate {float(rate):.3%} -> threshold {threshold:.6f}")
+    print(f"\n{report['note']}")
+
+
+def _log_mlflow(report: dict, checkpoint_path: Path, checkpoint: dict, params: dict) -> None:
     import mlflow
 
     tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_MLFLOW_TRACKING_URI)
     if tracking_uri == DEFAULT_MLFLOW_TRACKING_URI:
-        # SQLAlchemy will create the database file but not its parent directory.
-        Path("mlruns").mkdir(exist_ok=True)
+        Path("mlruns").mkdir(exist_ok=True)  # SQLAlchemy will not create the parent directory
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.set_experiment(DEFAULT_EXPERIMENT_NAME)
     with mlflow.start_run():
         mlflow.log_param("checkpoint_path", str(checkpoint_path))
         mlflow.log_param("checkpoint_epoch", checkpoint.get("epoch"))
-        mlflow.log_param("checkpoint_train_loss", checkpoint.get("train_loss"))
-        mlflow.log_param("checkpoint_val_loss", checkpoint.get("val_loss"))
-        mlflow.log_param("checkpoint_training_source", checkpoint.get("source", "unknown (checkpoint predates provenance fields)"))
-        mlflow.log_param("checkpoint_training_start", checkpoint.get("start", "unknown (checkpoint predates provenance fields)"))
-        mlflow.log_param("checkpoint_training_end", checkpoint.get("end", "unknown (checkpoint predates provenance fields)"))
-        mlflow.log_param("eval_start", eval_start.isoformat())
-        mlflow.log_param("eval_end", eval_end.isoformat())
-        mlflow.log_param("eval_source", source)
-        mlflow.log_param("holdout_method", HOLDOUT_METHOD)
-        mlflow.log_param("holdout_windows", holdout_windows)
-        mlflow.log_param("seed", seed)
-
-        mlflow.log_metric("chosen_threshold", chosen.threshold)
-        mlflow.log_metric("chosen_precision", chosen.metrics.precision)
-        mlflow.log_metric("chosen_recall", chosen.metrics.recall)
-        mlflow.log_metric("chosen_f1", chosen.metrics.f1)
-        mlflow.log_metric("baseline_best_f1", baseline_best.metrics.f1)
-        mlflow.log_metric("beats_baseline", float(chosen.metrics.f1 > baseline_best.metrics.f1))
-
-        mlflow.log_dict(
-            {
-                name: [
-                    {"threshold": r.threshold, "precision": r.metrics.precision, "recall": r.metrics.recall, "f1": r.metrics.f1}
-                    for r in sweep.results
-                ]
-                for name, sweep in sweeps.items()
-            },
-            "threshold_sweep.json",
-        )
-        mlflow.log_dict(
-            {
-                pattern: {
-                    "n": result.n_observations,
-                    "precision": result.metrics.precision,
-                    "recall": result.metrics.recall,
-                    "f1": result.metrics.f1,
-                    "true_positive": result.metrics.confusion.true_positive,
-                    "false_positive": result.metrics.confusion.false_positive,
-                }
-                for pattern, result in breakdown.items()
-            },
-            "per_pattern_breakdown.json",
-        )
+        for key, value in params.items():
+            mlflow.log_param(key, value)
+        mlflow.log_metric("reports", report["reports"])
+        mlflow.log_metric("any_detector_flag_rate", report["any_detector_flag_rate"])
+        mlflow.log_metric("two_or_more_detectors_flag_rate", report["two_or_more_detectors_flag_rate"])
+        for name, value in report["error_percentiles"].items():
+            mlflow.log_metric(f"error_{name.replace('.', '_')}", value)
+        if report["flag_rate_at_operating_threshold"] is not None:
+            mlflow.log_metric("flag_rate_at_operating_threshold", report["flag_rate_at_operating_threshold"])
+        mlflow.log_dict(report, "report.json")
 
 
 async def run(
@@ -270,135 +244,64 @@ async def run(
     checkpoint_path: Path,
     eval_start: datetime,
     eval_end: datetime,
-    seed: int,
     device_name: str | None,
     skip_mlflow: bool,
     source: TrainingDataSource = "live",
     batch_size: int = DEFAULT_EVAL_BATCH_SIZE,
+    include_training_vessels: bool = False,
+    max_windows: int | None = None,
+    out_path: Path | None = None,
+    freeze_threshold: float = DEFAULT_FREEZE_REPLAY_THRESHOLD,
+    speed_jump_threshold: float | None = None,
 ) -> int:
-    device = torch.device(device_name) if device_name else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, checkpoint = load_checkpoint(checkpoint_path, device)
-    provenance_fallback = "unknown (checkpoint predates provenance fields)"
-    print(f"scoring checkpoint={checkpoint_path} epoch={checkpoint.get('epoch')} train_loss={checkpoint.get('train_loss')} val_loss={checkpoint.get('val_loss')}")
-    print(f"checkpoint training provenance: source={checkpoint.get('source', provenance_fallback)} start={checkpoint.get('start', provenance_fallback)} end={checkpoint.get('end', provenance_fallback)}")
-    print(f"eval range: {eval_start.isoformat()}..{eval_end.isoformat()} (seed={seed}, device={device}, source={source})")
-    print(f"holdout_method = {HOLDOUT_METHOD}; eval_batch_size={batch_size}")
-
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
-    import psutil
-    process = psutil.Process()
-    observations: list[AISObservation] = []
-    batch: list = []
-    holdout_windows = 0
-    batches_scored = 0
+    device = torch.device(device_name) if device_name else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, checkpoint = load_checkpoint(checkpoint_path, device)
+    fallback = "unknown (checkpoint predates provenance fields)"
+    print(f"scoring checkpoint={checkpoint_path} epoch={checkpoint.get('epoch')} train_loss={checkpoint.get('train_loss')} val_loss={checkpoint.get('val_loss')}")
+    print(f"checkpoint training provenance: source={checkpoint.get('source', fallback)} start={checkpoint.get('start', fallback)} end={checkpoint.get('end', fallback)}")
+    scope = "all vessels" if include_training_vessels else HOLDOUT_METHOD
+    print(f"eval range: {eval_start.isoformat()}..{eval_end.isoformat()} (device={device}, source={source}, vessels: {scope})")
 
-    def _profile() -> str:
-        rss_mib = process.memory_info().rss / 1024 ** 2
-        if device.type != "cuda":
-            return f"rss={rss_mib:.1f} MiB gpu=not-in-use"
-        allocated_mib = torch.cuda.memory_allocated(device) / 1024 ** 2
-        try:
-            utilization = torch.cuda.utilization(device)
-            gpu_note = f"gpu_utilization={utilization}%"
-        except (AttributeError, RuntimeError):
-            gpu_note = "gpu_utilization=unavailable"
-        return f"rss={rss_mib:.1f} MiB cuda_allocated={allocated_mib:.1f} MiB {gpu_note}"
+    parts: list[ReportScores] = []
+    batch: list[FeatureWindow] = []
+    seen_windows = 0
 
     def _score_batch() -> None:
-        nonlocal batches_scored
         if not batch:
             return
-        injected = build_synthetic_dataset(batch, seed=seed + batches_scored)
-        observations.extend(score_injected_windows(model, injected))
-        batches_scored += 1
-        if batches_scored == 1 or batches_scored % PROFILE_EVERY_BATCHES == 0:
-            print(f"scored batch={batches_scored:,} holdout_windows={holdout_windows:,} observations={len(observations):,} {_profile()}", flush=True)
+        parts.append(score_windows(model, batch))
+        if len(parts) == 1 or len(parts) % PROFILE_EVERY_BATCHES == 0:
+            print(f"scored batch={len(parts):,} windows={seen_windows:,}", flush=True)
         batch.clear()
 
     async for window in stream_feature_windows(
-        dsn, eval_start, eval_end, source=source, progress_every=50_000,
+        dsn, eval_start, eval_end, source=source, max_windows=max_windows, progress_every=50_000,
         on_progress=lambda rows, vessels, windows: print(f"loading: {rows:,} rows | {vessels:,} vessels | {windows:,} windows", flush=True),
     ):
-        if not is_validation_vessel(window.mmsi):
+        if not include_training_vessels and not is_validation_vessel(window.mmsi):
             continue
         batch.append(window)
-        holdout_windows += 1
+        seen_windows += 1
         if len(batch) >= batch_size:
             _score_batch()
     _score_batch()
 
-    if not observations:
-        print(f"no clean windows found for {eval_start.isoformat()}..{eval_end.isoformat()}", file=sys.stderr)
+    if not parts:
+        print(f"no windows found for {eval_start.isoformat()}..{eval_end.isoformat()} (source={source})", file=sys.stderr)
         return 1
-    print(f"scored {len(observations):,} observations across {holdout_windows:,} held-out windows in {batches_scored:,} bounded batches; {_profile()}")
 
-    sweeps = {
-        "prediction_error": sweep_thresholds(
-            observations, "prediction_error", prediction_error_detector,
-            threshold_candidates([prediction_error_detector(o) for o in observations]),
-        ),
-        "speed_jump": sweep_thresholds(
-            observations, "speed_jump", speed_jump_detector,
-            threshold_candidates([speed_jump_detector(o) for o in observations]),
-        ),
-        # Added per ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md section 3:
-        # prediction_error_detector's own per-pattern breakdown (the followup run) found
-        # freeze/replay its weakest pattern (F1=0.244) - a frozen position doesn't
-        # necessarily produce a large next-step prediction error, it just isn't a *new*
-        # position, which is exactly the signature freeze_replay_detector looks for
-        # instead. Swept and broken down the same way as the other two detectors so this
-        # run reports directly whether it actually improves on 0.244, rather than just
-        # asserting it should.
-        "freeze_replay": sweep_thresholds(
-            observations, "freeze_replay", freeze_replay_detector,
-            threshold_candidates([freeze_replay_detector(o) for o in observations]),
-        ),
-    }
-    for sweep in sweeps.values():
-        _print_sweep(sweep)
-
-    chosen = sweeps["prediction_error"].best_by_f1()
-    baseline_best = sweeps["speed_jump"].best_by_f1()
-    freeze_replay_best = sweeps["freeze_replay"].best_by_f1()
-
-    breakdown = per_pattern_breakdown(observations, prediction_error_detector, chosen.threshold)
-    _print_breakdown(breakdown, chosen.threshold)
-
-    freeze_replay_breakdown = per_pattern_breakdown(observations, freeze_replay_detector, freeze_replay_best.threshold)
-    prior_freeze_replay_f1 = breakdown.get(FREEZE_REPLAY_PATTERN_LABEL)
-    new_freeze_replay_f1 = freeze_replay_breakdown.get(FREEZE_REPLAY_PATTERN_LABEL)
-    if prior_freeze_replay_f1 is not None and new_freeze_replay_f1 is not None:
-        comparison = "improves on" if new_freeze_replay_f1.metrics.f1 > prior_freeze_replay_f1.metrics.f1 else "does not improve on"
-        print(
-            f"\nfreeze_replay_detector on the freeze_replay pattern: F1={new_freeze_replay_f1.metrics.f1:.3f} "
-            f"@ threshold={freeze_replay_best.threshold:.6f} ({comparison} prediction_error_detector's "
-            f"F1={prior_freeze_replay_f1.metrics.f1:.3f} on the same pattern)."
-        )
-
-    if chosen.metrics.f1 > baseline_best.metrics.f1:
-        verdict = "beats"
-    elif chosen.metrics.f1 < baseline_best.metrics.f1:
-        verdict = "does NOT beat"
-    else:
-        verdict = "ties"
-    print(
-        f"\nVerdict: prediction_error_detector (F1={chosen.metrics.f1:.3f} @ threshold={chosen.threshold:.6f}) "
-        f"{verdict} speed_jump_detector (F1={baseline_best.metrics.f1:.3f} @ threshold={baseline_best.threshold:.6f})."
-    )
-    if verdict == "does NOT beat":
-        print(
-            "This is a valid outcome to report, not a failure to hide: a live scoring service built on "
-            "this checkpoint should ship with an explicit caveat that detection quality is unproven."
-        )
-
+    report = build_report(merge_scores(parts), OPERATING_THRESHOLD, freeze_threshold, speed_jump_threshold)
+    report["checkpoint"] = {"path": str(checkpoint_path), "epoch": checkpoint.get("epoch")}
+    report["eval"] = {"source": source, "start": eval_start.isoformat(), "end": eval_end.isoformat(), "vessels": scope}
+    print_report(report)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        print(f"wrote {out_path}")
     if not skip_mlflow:
-        _log_mlflow(checkpoint_path, checkpoint, eval_start, eval_end, seed, sweeps, chosen, baseline_best, breakdown, source, holdout_windows)
-
-    print(
-        f"\nIf this is the run you want to ship, update OPERATING_THRESHOLD in "
-        f"models/bilstm/threshold.py to {chosen.threshold:.6f} and fill in its provenance comment."
-    )
+        _log_mlflow(report, checkpoint_path, checkpoint, {"eval_source": source, "eval_start": eval_start.isoformat(), "eval_end": eval_end.isoformat(), "vessels": scope})
     return 0
 
 
@@ -406,28 +309,22 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dsn", required=True)
     parser.add_argument("--checkpoint", required=True, help="Path to a .pt checkpoint, e.g. checkpoints/epoch_010.pt")
-    # Matches ml/training/train.py::main()'s convention for the same choice, including
-    # the "live" default - callers scoring against the historical backfill must pass
-    # --source historical explicitly, the same way training does.
     parser.add_argument("--source", choices=("live", "historical"), default="live")
-    parser.add_argument("--eval-start", required=True, help="ISO date/datetime, start of the eval range")
-    parser.add_argument("--eval-end", required=True, help="ISO date/datetime, end of the eval range")
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_EVAL_BATCH_SIZE, help="Held-out windows per bounded injection/model batch.")
+    parser.add_argument("--eval-start", required=True, help="ISO date/datetime, start of the range")
+    parser.add_argument("--eval-end", required=True, help="ISO date/datetime, end of the range")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_EVAL_BATCH_SIZE, help="Windows per model batch.")
     parser.add_argument("--device", choices=("cpu", "cuda"), help="Defaults to cuda if available, else cpu.")
-    parser.add_argument("--no-mlflow", action="store_true", help="Skip MLflow logging (useful for quick local checks).")
+    parser.add_argument("--include-training-vessels", action="store_true", help="Score every vessel, not only the validation split.")
+    parser.add_argument("--max-windows", type=int, help="Development cap on windows read from the database.")
+    parser.add_argument("--freeze-replay-threshold", type=float, default=DEFAULT_FREEZE_REPLAY_THRESHOLD)
+    parser.add_argument("--speed-jump-threshold", type=float, default=None, help="Off unless given, like the live scorer.")
+    parser.add_argument("--out", type=Path, help="Write the report as JSON here.")
+    parser.add_argument("--no-mlflow", action="store_true", help="Skip MLflow logging.")
     args = parser.parse_args(argv)
-
     return asyncio.run(run(
-        args.dsn,
-        Path(args.checkpoint),
-        datetime.fromisoformat(args.eval_start),
-        datetime.fromisoformat(args.eval_end),
-        args.seed,
-        args.device,
-        args.no_mlflow,
-        args.source,
-        args.batch_size,
+        args.dsn, Path(args.checkpoint), datetime.fromisoformat(args.eval_start), datetime.fromisoformat(args.eval_end),
+        args.device, args.no_mlflow, args.source, args.batch_size, args.include_training_vessels, args.max_windows,
+        args.out, args.freeze_replay_threshold, args.speed_jump_threshold,
     ))
 
 

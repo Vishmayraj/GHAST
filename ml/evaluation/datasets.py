@@ -14,10 +14,6 @@ import csv
 from dataclasses import dataclass
 from pathlib import Path
 
-from features.extract import COG_INDEX, HEADING_INDEX, SOG_INDEX
-from features.inject import build_synthetic_dataset
-from features.pipeline import load_training_windows
-
 
 @dataclass(frozen=True)
 class AISObservation:
@@ -41,15 +37,8 @@ class AISObservation:
     # vessel's own reported `sog` above. evaluation.baselines.freeze_replay_detector
     # compares the two to catch a frozen/replayed report claiming movement it
     # didn't actually make. Only populated where the caller has real feature
-    # windows to derive it from (currently score_checkpoint.py::score_injected_windows).
+    # windows to derive it from (currently scoring/live_scorer.py::window_observations).
     implied_speed: float | None = None
-    # Which synthetic injector produced this row (see features.inject.SPOOF_PATTERNS),
-    # or None for an unmodified control row. Only ever populated for
-    # injected_synthetic-sourced observations; every other loader leaves this at
-    # its default. Kept on the shared dataclass rather than a parallel structure
-    # so later per-pattern reporting (score_checkpoint.py, and whatever consumes
-    # its output next) doesn't need to re-derive it from the window shape.
-    pattern: str | None = None
     source: str = "unknown"
 
 
@@ -113,36 +102,8 @@ def load_gps_spoofing_mass(path: str | Path) -> list[AISObservation]:
 # than requiring the caller to know which loader function to import.
 DATASET_LOADERS = {
     "gps_spoofing_mass": load_gps_spoofing_mass,
-    "injected_synthetic": None,  # assigned after its async loader definition
 }
 
 DEFAULT_DATASET_PATHS = {
     "gps_spoofing_mass": Path("../data/research_datasets/gps_spoofing_mass/gps_spoofing_data.csv"),
 }
-
-
-async def load_injected_synthetic(
-    dsn: str, start, end, seed: int = 0
-) -> list[AISObservation]:
-    """Create labeled point observations from TimescaleDB trajectories on demand.
-
-    Unlike file datasets this loader is async because it deliberately reads the
-    project's live trajectory store. Prediction errors remain unset until model
-    inference populates them in training/evaluation code.
-    """
-    injected_windows = build_synthetic_dataset(await load_training_windows(dsn, start, end), seed=seed)
-    observations: list[AISObservation] = []
-    for injected in injected_windows:
-        for index, is_spoofed in enumerate(injected.is_spoofed):
-            features = injected.window.features[index]
-            latitude, longitude = injected.window.positions[index]
-            observations.append(AISObservation(
-                mmsi=str(injected.window.mmsi), timestamp=injected.window.timestamps[index].isoformat(),
-                latitude=float(latitude), longitude=float(longitude), sog=float(features[SOG_INDEX]),
-                cog=float(features[COG_INDEX]), heading=float(features[HEADING_INDEX]),
-                is_spoofed=is_spoofed, source="injected_synthetic",
-            ))
-    return observations
-
-
-DATASET_LOADERS["injected_synthetic"] = load_injected_synthetic

@@ -1,16 +1,18 @@
-"""summary.py must be deterministic and must separate the injector's patterns."""
+"""summary.py must be deterministic and must make each pattern visible in the text.
+
+The altered tracks below are built by hand from a clean track. They are unit-test fixtures for the
+summary function, not a data source.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
-import pytest
 
 from features.extract import COG_INDEX, N_FEATURES, SOG_INDEX
-from features.inject import INJECTORS, SPOOF_PATTERNS
 from features.pipeline import FeatureWindow
 from features.summary import (
-    NORMAL_LABEL, PATTERN_LABELS, label_for_pattern, pattern_questions, summarize_rows, window_to_rows,
+    PATTERN_LABELS, pattern_questions, summarize_rows, window_to_rows,
 )
 
 START = datetime(2026, 9, 1, tzinfo=timezone.utc)
@@ -24,6 +26,27 @@ def clean_window(n: int = 20) -> FeatureWindow:
     positions = np.array([(51.0 + i * 0.0028, 4.0) for i in range(n)], dtype=np.float64)
     timestamps = tuple(START + timedelta(minutes=i) for i in range(n))
     return FeatureWindow(1, timestamps[0], timestamps[-1], features, positions, timestamps)
+
+
+def with_teleport(window: FeatureWindow, index: int = 10, km: float = 55.0) -> FeatureWindow:
+    """One report moved far from the track."""
+    positions = window.positions.copy()
+    positions[index] += (km / 111.0, 0.0)
+    return FeatureWindow(window.mmsi, window.window_start, window.window_end, window.features.copy(), positions, window.timestamps)
+
+
+def with_replayed_stretch(window: FeatureWindow, start: int = 10, length: int = 6) -> FeatureWindow:
+    """Earlier positions copied forward over later reports, so the track loops back."""
+    positions = window.positions.copy()
+    positions[start:start + length] = positions[start - length:start]
+    return FeatureWindow(window.mmsi, window.window_start, window.window_end, window.features.copy(), positions, window.timestamps)
+
+
+def with_flipped_course(window: FeatureWindow, index: int = 10) -> FeatureWindow:
+    """Reported course rotated away from the direction of travel at one report."""
+    features = window.features.copy()
+    features[index, COG_INDEX] = (features[index, COG_INDEX] + 150.0) % 360.0
+    return FeatureWindow(window.mmsi, window.window_start, window.window_end, features, window.positions.copy(), window.timestamps)
 
 
 def fields(text: str) -> dict[str, str]:
@@ -43,16 +66,16 @@ def test_clean_window_looks_normal() -> None:
 
 
 def test_teleport_shows_huge_implied_speed() -> None:
-    injected, _ = INJECTORS["teleport_jump"](clean_window(), 0.5, seed=3)
+    injected = with_teleport(clean_window())
     text = summarize_rows(window_to_rows(injected))
     assert float(fields(text)["max_step_km"]) > 5.0
     assert float(fields(text)["max_implied_over_max_reported"]) > 20.0
 
 
 def test_freeze_replay_shows_stationary_claims() -> None:
-    injected, _ = INJECTORS["freeze_replay"](clean_window(), 1.0, seed=3)
+    injected = with_replayed_stretch(clean_window())
     fields_ = fields(summarize_rows(window_to_rows(injected)))
-    # The injector replays earlier positions (a loop), rather than holding one position still.
+    # A replayed stretch loops back over ground already covered, rather than holding one position still.
     assert int(fields_["reports_repeating_earlier_positions"]) > 0
 
 
@@ -68,16 +91,16 @@ def test_clean_window_repeats_no_positions() -> None:
 
 
 def test_impossible_kinematics_shows_course_mismatch() -> None:
-    injected, _ = INJECTORS["impossible_kinematics"](clean_window(), 1.0, seed=3)
+    injected = with_flipped_course(clean_window())
     text = summarize_rows(window_to_rows(injected))
     assert float(fields(text)["max_course_vs_travel_direction_deg"]) >= 90.0
     assert "steps_claiming_speed_but_not_moving: 0, longest_run: 0" in text
 
 
 def test_stale_cached_implied_speed_column_is_ignored() -> None:
-    # The injectors leave features[:, IMPLIED_SPEED_INDEX] untouched; the summary must not care.
+    # track_history rows have no cached implied-speed column, so the summary must not use one.
     window = clean_window()
-    injected, _ = INJECTORS["teleport_jump"](window, 0.5, seed=3)
+    injected = with_teleport(window)
     assert np.array_equal(injected.features, window.features)
     assert summarize_rows(window_to_rows(injected)) != summarize_rows(window_to_rows(window))
 
@@ -89,7 +112,4 @@ def test_too_short_track_does_not_raise() -> None:
 def test_labels_and_question_agree() -> None:
     criteria = pattern_questions()["pattern"]["criteria"]
     assert tuple(criteria) == PATTERN_LABELS
-    assert set(SPOOF_PATTERNS) < set(PATTERN_LABELS)
-    assert label_for_pattern(None) == NORMAL_LABEL
-    with pytest.raises(ValueError):
-        label_for_pattern("nonsense")
+    assert len(set(PATTERN_LABELS)) == len(PATTERN_LABELS)

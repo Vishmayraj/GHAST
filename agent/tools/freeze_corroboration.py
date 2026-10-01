@@ -2,8 +2,8 @@
 
 evaluation.baselines.freeze_replay_detector (ml/) scores one AISObservation at a
 time against its own precomputed `implied_speed` feature column
-(features.extract.IMPLIED_SPEED_INDEX), which offline scoring derives per-window in
-evaluation/score_checkpoint.py::score_injected_windows before the detector ever runs.
+(features.extract.IMPLIED_SPEED_INDEX), which the live scorer derives per-window in
+scoring/live_scorer.py::window_observations before the detector ever runs.
 The agent has no feature window here, only agent/tools/track_history.py's raw
 position rows (`received_at`, `latitude`, `longitude`, `sog_knots`, `cog_deg`) -
 exactly the row shape features.extract.implied_speed_knots already expects for

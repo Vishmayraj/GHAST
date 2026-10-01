@@ -3,13 +3,13 @@
 Two callers must agree on this text exactly, or the fine-tuned classifier is trained on
 one thing and served another:
 
-* `evaluation/laya_export.py` builds the fine-tuning set from injected windows,
+* `evaluation/laya_export.py` builds the review queue and fine-tuning set from real windows,
 * `agent/tools/pattern_classifier.py` builds the live input from `track_history` rows.
 
 So the summary only uses columns both sides have (`received_at`, `latitude`, `longitude`,
 `sog_knots`, `cog_deg`), and recomputes implied speed from positions and timestamps. It does
-NOT read the cached implied-speed feature column: the injectors move positions without
-refreshing that column, so it would be stale on exactly the windows we train on.
+NOT read the cached implied-speed feature column, because `track_history` rows have no such
+column.
 
 Pure Python plus features.extract helpers. No torch, no asyncpg, no Laya import.
 """
@@ -25,9 +25,8 @@ from .extract import (
     haversine_kilometres, implied_speed_knots,
 )
 
-# The injector's `None` pattern (a clean control window) is called "normal_track" here:
-# Laya's docs warn that choice keys are rendered verbatim, so the label should read like
-# what it means rather than an internal name.
+# The "nothing wrong" class is called "normal_track": Laya's docs warn that choice keys are
+# rendered verbatim, so the label should read like what it means rather than an internal name.
 NORMAL_LABEL = "normal_track"
 PATTERN_LABELS = (NORMAL_LABEL, "teleport_jump", "gradual_drift", "freeze_replay", "impossible_kinematics")
 QUESTION_ID = "pattern"
@@ -48,15 +47,6 @@ def pattern_questions() -> dict[str, Any]:
         "instructions": "Which spoofing pattern best explains this AIS track summary, or is it a normal track?",
         "criteria": dict(_CRITERIA),
     }}
-
-
-def label_for_pattern(pattern: str | None) -> str:
-    """Map the injector's pattern (None for control) to a Laya choice key."""
-    if pattern is None:
-        return NORMAL_LABEL
-    if pattern not in PATTERN_LABELS:
-        raise ValueError(f"unknown pattern: {pattern!r}")
-    return pattern
 
 
 def window_to_rows(window: Any) -> list[dict[str, Any]]:
@@ -98,9 +88,9 @@ def _revisited_positions(ordered: Sequence[Mapping[str, Any]]) -> int:
     """Reports whose exact coordinates (to ~1 m) match an earlier, non-adjacent report while
     differing from the report just before them: a replayed stretch, not a vessel at rest.
 
-    features.inject.inject_freeze_replay copies earlier positions forward, so this is the
-    signature the injected freeze_replay class actually leaves (the position does not sit
-    still; it loops back over ground already covered).
+    A replayed stretch does not sit still; it loops back over ground already covered, which
+    is a different signature from a vessel holding one position (see the stationary-claims
+    fields).
     """
     seen: dict[tuple[float, float], int] = {}
     count = 0

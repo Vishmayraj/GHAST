@@ -1,23 +1,25 @@
-"""Export a class-balanced Laya fine-tuning set from the injector's own pattern labels.
+"""Build Laya training data from real AIS windows and human labels. No synthetic injection.
 
-BigPass plan section 6. Each row is one 20-report window, either left clean (label
-`normal_track`) or altered by one of features.inject's four injectors, turned into the
-row schema Laya's fine-tuning notebook reads (`state`, `questions`, `gold`, each a JSON
-string). The text comes from features.summary, the same function the live
-agent/tools/pattern_classifier.py uses, so training and serving see identical input.
+The Laya classifier answers "which pattern does this 20-report window show?". Real windows
+in the database have no labels, so the data is made in two steps with a person in between:
 
-Why this is not "sample down the 6.4M scored rows": classes are assigned per window from a
-hash, so they are near-even by construction and quotas trim the rest. That sidesteps the
-injector's CONTROL_FRACTION skew, and it never holds more than one window in memory.
+1. `queue`: sample real 20-report windows from `vessel_position`, summarise each one with
+   features.summary (the same text the live agent tool sends), and write a review queue.
+   Rows have no `gold` answer.
+2. A reviewer writes a labels file, one JSON object per line: {"id": "<queue id>", "label":
+   "<one of features.summary.PATTERN_LABELS>"}. Unlabeled queue rows are ignored.
+3. `build`: join queue and labels into train.jsonl, holdout.jsonl and manifest.json in the row
+   schema Laya's fine-tuning notebook reads (`id, split, mmsi, pattern, severity, state,
+   questions, gold`).
 
-Splits are by vessel with the same rule the BiLSTM used (training.dataset_cache.
-is_validation_vessel), so Laya's held-out rows come from vessels the BiLSTM never trained
-on and no vessel is on both sides.
+The split is by vessel with the BiLSTM's rule (training.dataset_cache.is_validation_vessel), so
+no vessel is on both sides and holdout vessels were not seen by the BiLSTM in training.
 
-Usage (from ml/, DB reachable; nothing here needs torch or a checkpoint):
-    python -m evaluation.laya_export --dsn $POSTGRES_DSN --source historical \\
-        --start 2026-04-01 --end 2026-04-15 --out-dir ../data/laya
-Writes train.jsonl, holdout.jsonl and manifest.json into --out-dir.
+Usage (from ml/; the queue step needs the database, neither step needs torch or a checkpoint):
+    python -m evaluation.laya_export queue --dsn $POSTGRES_DSN --source live \\
+        --start 2026-09-01 --end 2026-09-30 --out ../data/laya/review_queue.jsonl
+    python -m evaluation.laya_export build --queue ../data/laya/review_queue.jsonl \\
+        --labels ../data/laya/labels.jsonl --out-dir ../data/laya
 """
 from __future__ import annotations
 
@@ -26,33 +28,17 @@ import asyncio
 import hashlib
 import json
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import numpy as np
+from features.summary import NORMAL_LABEL, PATTERN_LABELS, QUESTION_ID, pattern_questions, summarize_rows, window_to_rows
 
-from features.extract import COG_INDEX, MISSING_VALUE, haversine_kilometres, implied_speed_knots
-from features.inject import INJECTORS
-from features.summary import (
-    NORMAL_LABEL, PATTERN_LABELS, QUESTION_ID, label_for_pattern, pattern_questions,
-    summarize_rows, window_to_rows,
-)
-
-SEVERITIES = (0.25, 0.5, 0.75)
-
-# Observability gate. Two injectors are no-ops on a vessel that is not moving: freeze_replay
-# copies earlier positions forward (identical to the jitter already there), and
-# impossible_kinematics flips one COG value (COG is noise at rest, so nothing stands out).
-# Labelling those rows as spoofs teaches the model to guess, and it is why ~60% of stationary
-# holdout windows were misclassified. Rows whose injection cannot be seen in the summary are
-# skipped, not relabelled, and counted in the manifest.
-MIN_FREEZE_DISPLACEMENT_KM = 0.05   # a replay must move some report at least this far (50 m)
-MIN_UNDERWAY_KNOTS = 1.0            # same 1 kn rule summary.py uses before trusting course vs travel
-DEFAULT_PER_CLASS_TRAIN = 1500
-DEFAULT_PER_CLASS_HOLDOUT = 300
-DEFAULT_SAMPLE_PERMILLE = 50
+DEFAULT_SAMPLE_PERMILLE = 5
+DEFAULT_MAX_ROWS = 2000
+MIN_LABELED_PER_CLASS_WARNING = 50
+SPLITS = ("train", "holdout")
 
 
 def _hash_int(*parts: object, seed: int) -> int:
@@ -60,187 +46,196 @@ def _hash_int(*parts: object, seed: int) -> int:
     return int.from_bytes(digest[:8], "big")
 
 
-def assign_case(window: Any, seed: int) -> tuple[str, float, int]:
-    """Deterministically pick (label, severity, injector_seed) for one clean window."""
-    h = _hash_int(window.mmsi, window.window_start.isoformat(), seed=seed)
-    label = PATTERN_LABELS[h % len(PATTERN_LABELS)]
-    severity = SEVERITIES[(h >> 8) % len(SEVERITIES)]
-    return label, severity, (h >> 16) % (2**32 - 1)
+def window_id(window: Any) -> str:
+    """Stable id for a real window: vessel plus the time of its first report."""
+    return f"{window.mmsi}-{window.window_start.isoformat()}"
 
 
 def keep_window(window: Any, seed: int, sample_permille: int) -> bool:
-    """Order-independent thinning, so streaming in MMSI order doesn't bias which vessels we see."""
+    """Order-independent thinning, so streaming in MMSI order does not bias which vessels we see."""
     return _hash_int("keep", window.mmsi, window.window_start.isoformat(), seed=seed) % 1000 < sample_permille
 
 
-def inject(window: Any, label: str, severity: float, injector_seed: int) -> Any:
-    """The window with `label` injected (the window itself for the clean control class)."""
-    if label == NORMAL_LABEL:
-        return window
-    altered, _ = INJECTORS[label](window, severity, injector_seed)
-    return altered
+def queue_row(window: Any, split: str, source: str) -> dict[str, Any]:
+    """One review-queue row: the summary text and where it came from, with no answer."""
+    if split not in SPLITS:
+        raise ValueError(f"unknown split: {split!r}")
+    return {
+        "id": window_id(window),
+        "split": split,
+        "mmsi": window.mmsi,
+        "source": source,
+        "window_start": window.window_start.isoformat(),
+        "window_end": window.window_end.isoformat(),
+        "state": json.dumps(summarize_rows(window_to_rows(window))),
+        "questions": json.dumps(pattern_questions()),
+    }
 
 
-def injection_is_observable(label: str, clean: Any, altered: Any) -> bool:
-    """False when the injection leaves nothing a summary of the altered window could show.
-
-    teleport_jump and gradual_drift move positions by kilometres, so they always show.
-    """
-    if label == "freeze_replay":
-        shift = max(
-            haversine_kilometres(a[0], a[1], b[0], b[1])
-            for a, b in zip(clean.positions, altered.positions)
-        )
-        return shift >= MIN_FREEZE_DISPLACEMENT_KM
-    if label == "impossible_kinematics":
-        changed = np.flatnonzero(clean.features[:, COG_INDEX] != altered.features[:, COG_INDEX])
-        if len(changed) == 0 or clean.features[changed[0], COG_INDEX] == MISSING_VALUE:
-            return False
-        index = int(changed[0])
-        if index == 0:
-            return False
-        speed = implied_speed_knots(
-            {"received_at": clean.timestamps[index - 1], "latitude": clean.positions[index - 1][0], "longitude": clean.positions[index - 1][1]},
-            {"received_at": clean.timestamps[index], "latitude": clean.positions[index][0], "longitude": clean.positions[index][1]},
-        )
-        return speed > MIN_UNDERWAY_KNOTS
-    return True
+def collect_queue(
+    windows: Iterable[Any], seed: int, sample_permille: int, is_holdout_vessel: Callable[[int], bool],
+    source: str, max_rows: int,
+) -> list[dict[str, Any]]:
+    """Synchronous core: thin real windows into a review queue. Pure, so it is unit-tested."""
+    rows: list[dict[str, Any]] = []
+    for window in windows:
+        if len(rows) >= max_rows:
+            break
+        if keep_window(window, seed, sample_permille):
+            rows.append(queue_row(window, "holdout" if is_holdout_vessel(window.mmsi) else "train", source))
+    return rows
 
 
-def make_row(window: Any, label: str, severity: float, injector_seed: int, split: str, altered: Any | None = None) -> dict[str, Any]:
-    """One Laya training row from a clean window plus the label to inject into it."""
-    if altered is None:
-        altered = inject(window, label, severity, injector_seed)
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows = []
+    with path.open(encoding="utf-8") as handle:
+        for number, line in enumerate(handle, start=1):
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as error:
+                    raise ValueError(f"{path}:{number}: not valid JSON ({error})") from error
+    return rows
+
+
+def load_labels(path: Path) -> dict[str, str]:
+    """`id -> label`, validated. A repeated id must keep the same label."""
+    labels: dict[str, str] = {}
+    for row in load_jsonl(path):
+        if "id" not in row or "label" not in row:
+            raise ValueError(f"label row needs 'id' and 'label': {row!r}")
+        if row["label"] not in PATTERN_LABELS:
+            raise ValueError(f"unknown label {row['label']!r} for {row['id']}; expected one of {list(PATTERN_LABELS)}")
+        if labels.get(row["id"], row["label"]) != row["label"]:
+            raise ValueError(f"conflicting labels for {row['id']}")
+        labels[row["id"]] = row["label"]
+    return labels
+
+
+def training_row(queue_item: dict[str, Any], label: str) -> dict[str, Any]:
+    """A queue row plus its human label, in exactly the eight-column schema Laya's notebook loads."""
     gold = {QUESTION_ID: {
         "label": label,
         "probabilities": {key: 1.0 if key == label else 0.0 for key in PATTERN_LABELS},
     }}
     return {
-        "id": f"{split}-{window.mmsi}-{window.window_start.isoformat()}",
-        "split": split,
-        "mmsi": window.mmsi,
+        "id": queue_item["id"],
+        "split": queue_item["split"],
+        "mmsi": queue_item["mmsi"],
         "pattern": None if label == NORMAL_LABEL else label,
-        "severity": None if label == NORMAL_LABEL else severity,
-        "state": json.dumps(summarize_rows(window_to_rows(altered))),
-        "questions": json.dumps(pattern_questions()),
+        "severity": None,  # no injection, so there is no severity
+        "state": queue_item["state"],
+        "questions": queue_item["questions"],
         "gold": json.dumps(gold),
     }
 
 
-class Quota:
-    """Per-split, per-class caps; `done` once every cap is met."""
-
-    def __init__(self, per_class_train: int, per_class_holdout: int) -> None:
-        self._caps = {"train": per_class_train, "holdout": per_class_holdout}
-        self.counts: dict[str, Counter[str]] = {"train": Counter(), "holdout": Counter()}
-        self.skipped_unobservable: Counter[str] = Counter()
-
-    def wants(self, split: str, label: str) -> bool:
-        return self.counts[split][label] < self._caps[split]
-
-    def add(self, split: str, label: str) -> None:
-        self.counts[split][label] += 1
-
-    @property
-    def done(self) -> bool:
-        return all(self.counts[s][label] >= cap for s, cap in self._caps.items() for label in PATTERN_LABELS)
-
-
-def collect_rows(
-    windows: Iterable[Any], quota: Quota, seed: int, sample_permille: int, is_holdout_vessel,
-    observability_gate: bool = True,
-) -> list[dict[str, Any]]:
-    """Synchronous core: turn clean windows into quota-limited rows. Pure, so it is unit-tested."""
-    rows: list[dict[str, Any]] = []
-    for window in windows:
-        if quota.done:
-            break
-        if not keep_window(window, seed, sample_permille):
+def build_dataset(queue: list[dict[str, Any]], labels: dict[str, str]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, Any]]:
+    """Join queue and labels. Returns rows per split and a manifest of what was and was not used."""
+    rows: dict[str, list[dict[str, Any]]] = {split: [] for split in SPLITS}
+    counts: dict[str, Counter[str]] = {split: Counter() for split in SPLITS}
+    queue_ids = {item["id"] for item in queue}
+    unlabeled = 0
+    for item in queue:
+        label = labels.get(item["id"])
+        if label is None:
+            unlabeled += 1
             continue
-        label, severity, injector_seed = assign_case(window, seed)
-        split = "holdout" if is_holdout_vessel(window.mmsi) else "train"
-        if not quota.wants(split, label):
-            continue
-        altered = inject(window, label, severity, injector_seed)
-        if observability_gate and not injection_is_observable(label, window, altered):
-            quota.skipped_unobservable[label] += 1
-            continue
-        rows.append(make_row(window, label, severity, injector_seed, split, altered=altered))
-        quota.add(split, label)
-    return rows
+        rows[item["split"]].append(training_row(item, label))
+        counts[item["split"]][label] += 1
+    vessels = {split: {row["mmsi"] for row in rows[split]} for split in SPLITS}
+    overlap = vessels["train"] & vessels["holdout"]
+    if overlap:
+        raise ValueError(f"vessels appear in both splits: {sorted(overlap)[:5]}")
+    thin = sorted({
+        f"{split}:{label}" for split in SPLITS for label in PATTERN_LABELS
+        if counts[split][label] < MIN_LABELED_PER_CLASS_WARNING
+    })
+    manifest = {
+        "labels": list(PATTERN_LABELS),
+        "label_source": "human review of real windows; no synthetic injection",
+        "queue_rows": len(queue),
+        "unlabeled_queue_rows": unlabeled,
+        "label_ids_not_in_queue": sorted(set(labels) - queue_ids),
+        "counts": {split: dict(counts[split]) for split in SPLITS},
+        "sources": sorted({item.get("source", "unknown") for item in queue}),
+        "classes_below_minimum": {"minimum": MIN_LABELED_PER_CLASS_WARNING, "split_and_class": thin},
+    }
+    return rows, manifest
 
 
-async def _export(args: argparse.Namespace) -> int:
+def write_dataset(rows: dict[str, list[dict[str, Any]]], manifest: dict[str, Any], out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for split in SPLITS:
+        with (out_dir / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
+            for row in rows[split]:
+                handle.write(json.dumps(row) + "\n")
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+
+
+async def _queue(args: argparse.Namespace) -> int:
     from features.pipeline import stream_feature_windows
     from training.dataset_cache import is_validation_vessel
 
-    quota = Quota(args.per_class_train, args.per_class_holdout)
-    rows_by_split: dict[str, list[dict[str, Any]]] = {"train": [], "holdout": []}
-    windows: list[Any] = []
+    rows: list[dict[str, Any]] = []
+    batch: list[Any] = []
+
+    def drain() -> None:
+        room = args.max_rows - len(rows)
+        if room > 0:
+            rows.extend(collect_queue(batch, args.seed, args.sample_permille, is_validation_vessel, args.source, room))
+        batch.clear()
+
     async for window in stream_feature_windows(
         args.dsn, datetime.fromisoformat(args.start), datetime.fromisoformat(args.end), args.source,
         max_windows=args.max_windows,
     ):
-        windows.append(window)
-        # Bounded: the list only ever holds one small batch of clean windows before it is
-        # drained into (much smaller, quota-capped) rows.
-        if len(windows) >= 2000:
-            _drain(windows, quota, args, is_validation_vessel, rows_by_split)
-            windows.clear()
-            if quota.done:
+        batch.append(window)
+        if len(batch) >= 2000:  # bounded: one batch is thinned, then dropped
+            drain()
+            if len(rows) >= args.max_rows:
                 break
-    _drain(windows, quota, args, is_validation_vessel, rows_by_split)
-
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    for split in ("train", "holdout"):
-        with (out_dir / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
-            for row in rows_by_split[split]:
-                handle.write(json.dumps(row) + "\n")
-    manifest = {
-        "source": args.source, "start": args.start, "end": args.end, "seed": args.seed,
-        "sample_permille": args.sample_permille, "labels": list(PATTERN_LABELS),
-        "counts": {s: dict(quota.counts[s]) for s in quota.counts},
-        "quota_met": quota.done,
-        "observability_gate": None if args.keep_unobservable else {
-            "min_freeze_displacement_km": MIN_FREEZE_DISPLACEMENT_KM,
-            "min_underway_knots": MIN_UNDERWAY_KNOTS,
-            "skipped_unobservable": dict(quota.skipped_unobservable),
-        },
-    }
-    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(json.dumps(manifest, indent=2))
-    if not quota.done:
-        print("quota not met: widen --start/--end or raise --sample-permille; class counts above are what was found")
+    drain()
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+    print(f"wrote {len(rows)} queue rows to {out}; label them, then run `build`")
     return 0
 
 
-def _drain(
-    windows: list[Any], quota: Quota, args: argparse.Namespace, is_validation_vessel,
-    rows_by_split: dict[str, list[dict[str, Any]]],
-) -> None:
-    for row in collect_rows(windows, quota, args.seed, args.sample_permille, is_validation_vessel,
-                            observability_gate=not args.keep_unobservable):
-        rows_by_split[row["split"]].append(row)
+def _build(args: argparse.Namespace) -> int:
+    rows, manifest = build_dataset(load_jsonl(Path(args.queue)), load_labels(Path(args.labels)))
+    write_dataset(rows, manifest, Path(args.out_dir))
+    print(json.dumps(manifest, indent=2))
+    if manifest["classes_below_minimum"]["split_and_class"]:
+        print("some classes are below the minimum label count above; label more windows before fine-tuning")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--dsn", required=True)
-    parser.add_argument("--source", choices=("live", "historical"), default="historical")
-    parser.add_argument("--start", required=True, help="ISO date/datetime")
-    parser.add_argument("--end", required=True, help="ISO date/datetime")
-    parser.add_argument("--out-dir", required=True)
-    parser.add_argument("--per-class-train", type=int, default=DEFAULT_PER_CLASS_TRAIN)
-    parser.add_argument("--per-class-holdout", type=int, default=DEFAULT_PER_CLASS_HOLDOUT)
-    parser.add_argument("--sample-permille", type=int, default=DEFAULT_SAMPLE_PERMILLE, help="Keep this many windows per 1000 before class assignment.")
-    parser.add_argument("--max-windows", type=int, help="Development cap on windows read from the database.")
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--keep-unobservable", action="store_true",
-                        help="Disable the observability gate (old behaviour): keep freeze_replay / impossible_kinematics rows "
-                             "even when the injection is invisible in the summary, e.g. on stationary vessels.")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    queue = commands.add_parser("queue", help="sample real windows into a review queue")
+    queue.add_argument("--dsn", required=True)
+    queue.add_argument("--source", choices=("live", "historical"), default="live")
+    queue.add_argument("--start", required=True, help="ISO date/datetime")
+    queue.add_argument("--end", required=True, help="ISO date/datetime")
+    queue.add_argument("--out", required=True, help="review_queue.jsonl path")
+    queue.add_argument("--sample-permille", type=int, default=DEFAULT_SAMPLE_PERMILLE, help="Keep this many windows per 1000.")
+    queue.add_argument("--max-rows", type=int, default=DEFAULT_MAX_ROWS)
+    queue.add_argument("--max-windows", type=int, help="Development cap on windows read from the database.")
+    queue.add_argument("--seed", type=int, default=0)
+
+    build = commands.add_parser("build", help="join a review queue with human labels into Laya jsonl")
+    build.add_argument("--queue", required=True)
+    build.add_argument("--labels", required=True)
+    build.add_argument("--out-dir", required=True)
+
     args = parser.parse_args(argv)
-    return asyncio.run(_export(args))
+    return asyncio.run(_queue(args)) if args.command == "queue" else _build(args)
 
 
 if __name__ == "__main__":

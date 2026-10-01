@@ -2,7 +2,7 @@
 
 These exist to prove the evaluation harness works end-to-end before
 ml/models/bilstm/ has anything trained (Weeks 7-10 of
-ImplementationPlans/Sem5IP.md come after this). Neither is meant to be
+ImplementationPlans/old/Sem5IP.md come after this). Neither is meant to be
 competitive - they're a known-shape signal to run precision/recall/F1
 against so the harness itself is validated first.
 
@@ -54,7 +54,7 @@ def freeze_replay_detector(observation: AISObservation) -> float:
     report (the followup run's own per-pattern breakdown found freeze/replay F1
     only 0.244) - a frozen position is not necessarily a large next-step
     prediction error, it just isn't a *new* position. This detector looks at the
-    thing the injector actually does instead: `sog` claiming ongoing movement
+    frozen-report signature instead: `sog` claiming ongoing movement
     while `implied_speed` (the position delta from the previous report, converted
     to knots) is at or below FREEZE_DISPLACEMENT_EPSILON_KNOTS, i.e. the vessel
     didn't actually go anywhere despite saying it was moving.

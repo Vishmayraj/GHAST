@@ -2,46 +2,35 @@
 
 `scoring/live_scorer.py` (the live scoring service) imports OPERATING_THRESHOLD from
 here rather than each caller picking its own number. This module holds exactly one
-documented constant plus the provenance comment that justifies it - see
-`ImplementationPlans/Sem5_Evaluation_And_Threshold.md`,
-`ImplementationPlans/Sem5_Evaluation_Followup.md`, and
-`ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md` (in that order) for how it
-was produced.
+documented constant plus the provenance comment that justifies it.
 
 Provenance (fill in and update this block every time OPERATING_THRESHOLD changes):
     checkpoint:            checkpoints/epoch_010.pt (epoch 10, train_loss=0.0006055,
                            val_loss=0.0007673)
-    holdout method:        validation_vessel_split (fraction=0.2), via
-                           training.dataset_cache.is_validation_vessel - see
-                           ImplementationPlans/Sem5_Evaluation_Followup.md section 4
-    eval scale:            ~6.4M scored observations (control + the four
-                           features.inject.SPOOF_PATTERNS), full corrected run, not the
-                           1,000-window development cap
-    chosen tradeoff:       max F1
-    f1 at this threshold:  0.424 (precision/recall weren't separately recorded in the
-                           handoff summary this number was carried forward from - see
-                           ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md
-                           section 1; pull them from the MLflow run below if needed)
-    beats speed_jump baseline?: yes (0.424 vs 0.224)
-    MLflow experiment:     bilstm-checkpoint-scoring (run ID not recorded in the
-                           handoff summary - look it up via `mlflow ui
-                           --backend-store-uri sqlite:///mlruns/mlflow.db` if needed)
+    how it was chosen:     max F1 on labels made by a synthetic spoof injector
+                           (four patterns injected into held-out historical windows,
+                           validation vessel split, ~6.4M scored reports). That injector
+                           and its evaluation path have been removed from the repo. The
+                           number is therefore a leftover from a measurement of injected
+                           spoofs, not of real spoofing, and its 19.4% control flag rate
+                           was measured on the same data it was tuned on.
+    f1 at that time:       0.424 (speed_jump baseline 0.224); precision and recall were
+                           not recorded
+    status:                PLACEHOLDER UNTIL RE-DERIVED. Replace it with a threshold chosen
+                           by alert budget on real traffic:
+                           `python -m evaluation.score_checkpoint` prints the threshold
+                           that gives a target flag rate, per source (historical and live).
+                           See ImplementationPlans/01_Trust_Pass.md.
+    run provenance:        executed on another machine; no MLflow run id or result file is
+                           in the repository, so none of the above can be reproduced here.
 
-    Note on this entry's provenance: the run itself was executed elsewhere (this
-    number was handed off via ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md
-    rather than produced by re-running evaluation/score_checkpoint.py in this session,
-    which had no database or GPU access) - see that document for the full context. If
-    that changes and a new run supersedes this one, update every field above, not just
-    the number, so this block never drifts out of sync with what's actually deployed.
+When a new value replaces this one, update every field above, not just the number, so
+this block never drifts out of sync with what is deployed.
 
-OPERATING_THRESHOLD was None until evaluation/score_checkpoint.py was run at real
-scale against a real checkpoint and injected_synthetic eval range - see that script's
-`--help` for usage, and ImplementationPlans/Sem5_Evaluation_Followup.md for why a
-guessed number here would have been worse than refusing to score at all. A live
-scoring service should still treat `OPERATING_THRESHOLD is None` as "not ready to
-score" rather than falling back to a guessed default - that branch stays load-bearing
-even now that a real value is set, in case this ever needs resetting to None again
-(e.g. a retrained checkpoint whose own threshold hasn't been swept yet).
+A live scoring service should treat `OPERATING_THRESHOLD is None` as "not ready to score"
+rather than falling back to a guessed default. That branch stays load-bearing even now
+that a value is set, in case this ever needs resetting (for example a retrained checkpoint
+whose own threshold has not been calibrated yet).
 """
 from __future__ import annotations
 
