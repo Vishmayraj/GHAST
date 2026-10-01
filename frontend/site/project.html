@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Project. GHAST</title>
+  <meta name="description" content="What GHAST is, who is building it, and where it stands." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
+  <link rel="stylesheet" href="styles/pages.css" />
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+<header class="header"><div class="header__in"><a class="mark" href="index.html" aria-label="GHAST home"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 17H12"/><path d="M19 10v4" stroke-dasharray="1.5 2"/><circle cx="19" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5" fill="currentColor"/></svg><span>GHAST</span></a><button class="header__menu" aria-expanded="false" aria-controls="nav-links">Menu</button><nav class="header__links" id="nav-links" aria-label="Primary" data-open="false"><a href="how-it-works.html">How it works</a><a href="console.html">Console</a><a href="trust.html">Trust</a><a href="project.html" aria-current="page">Project</a><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></nav></div></header>
+<main>
+<div class="wrap page-head"><h1>A student project, built in the open.</h1></div>
+<section class="section" data-reveal><div class="wrap split"><div><h2>What it is.</h2></div><div class="prose">
+<p>GHAST watches vessel position reports and flags the ones that do not fit how that vessel should be moving. It then investigates the flag, writes down what it found, and hands the incident to a person.</p>
+<p>It is a three-semester build at GTU, written by one engineering student across semesters 5 to 7.</p>
+</div></div></section>
+<section class="section" data-reveal><div class="wrap split"><div><h2>Where it stands.</h2></div><div class="prose">
+<p>Position data is collected and stored, a detector flags unusual reports, and an investigation agent turns a flag into a hypothesis with evidence. The analyst console, jamming areas, fleet-wide checks and measured accuracy are the work still ahead.</p>
+<p>The pages on this site that look like product output use sample data and say so. The repository is the real state of the project at any time.</p>
+<p><a class="link" href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Read the source</a></p>
+</div></div></section>
+</main>
+<footer class="footer"><div class="wrap footer__in"><span>GHAST. GNSS and AIS Hazardous Spoofing Tracker.</span><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></div></footer>
+  <script src="scripts/ui.js"></script>
+  
+</body>
+</html>
