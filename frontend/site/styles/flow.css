@@ -1,0 +1,56 @@
+/* The flow: one line top to bottom. Each point fades in and out; the page shifts white to black. */
+.flow-page *, .flow-page *::before { transition: color 350ms, background-color 350ms, border-color 350ms, stroke 350ms, fill 350ms; }
+.flow-page { background: var(--paper); color: var(--ink); }
+.flow { position: relative; padding: 2rem 0 4rem; }
+.flow__line { position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--rule); }
+.flow__fill { position: absolute; inset: 0; background: var(--ink); transform-origin: top; transform: scaleY(var(--fill, 0)); }
+.pt { --o: 1; --dy: 0; position: relative; min-height: 62vh; display: grid; grid-template-columns: 1fr 1fr; gap: 6rem; align-items: center; max-width: var(--col-max); margin: 0 auto; padding: 0 var(--gutter); }
+.pt__node { position: absolute; left: 50%; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border: 2px solid var(--ink); border-radius: 50%; background: var(--paper); z-index: 2; transition: background-color 400ms, transform 500ms var(--ease); }
+.pt.is-passed .pt__node { background: var(--ink); }
+.pt.is-active .pt__node { transform: scale(1.5); }
+.pt__text, .pt__vis { opacity: var(--o); transform: translate(calc((1 - var(--o)) * var(--tx, 0px)), calc(var(--dy) * 1px)); will-change: opacity, transform; }
+.pt__n { font-family: var(--font-mono); font-size: var(--fs-meta); color: var(--ink-3); margin-bottom: 0.75rem; }
+.pt h2 { font-size: clamp(2.25rem, 1.5rem + 3vw, 4rem); }
+.pt p + p, .pt h2 + p { margin-top: 1.25rem; }
+.pt__vis svg { width: 100%; height: auto; max-width: 440px; }
+.pt--L .pt__text { grid-column: 1; text-align: right; --tx: -50px; }
+.pt--L .pt__text p { margin-left: auto; }
+.pt--L .pt__vis { grid-column: 2; --tx: 50px; }
+.pt--R .pt__text { grid-column: 2; --tx: 50px; }
+.pt--R .pt__vis { grid-column: 1; grid-row: 1; justify-self: end; --tx: -50px; }
+.pt--C { grid-template-columns: 1fr; justify-items: center; text-align: center; gap: 2rem; }
+.pt--C .pt__text { --tx: 0px; background: var(--paper); padding: 1rem 2rem; position: relative; z-index: 1; }
+.pt--C p { margin-left: auto; margin-right: auto; }
+.pt--C .pt__vis { display: none; }
+.pt--C h2 { font-size: clamp(2.75rem, 1.5rem + 5vw, 6rem); }
+.sv { fill: none; stroke: var(--ink); stroke-width: 2; }
+.sv-dim { fill: none; stroke: var(--ink-3); stroke-width: 2; }
+.sv-fill { fill: var(--ink); }
+.sv-sig { fill: #d8431f; }
+.sv-sig-line { fill: none; stroke: #d8431f; stroke-width: 1.5; }
+.fade-in { opacity: 0; transition: opacity 900ms var(--ease) var(--d, 0ms); }
+.is-active .fade-in { opacity: 1; }
+.agent-lines li { padding: 0.5rem 0; border-top: 1px solid var(--rule); clip-path: inset(0 100% 0 0); transition: clip-path 900ms var(--ease-io) var(--d, 0ms); font-family: var(--font-mono); font-size: 1rem; }
+.is-active .agent-lines li { clip-path: inset(0); }
+.verdicts-big li { font-family: var(--font-serif); font-size: clamp(1.75rem, 1.2rem + 2vw, 2.75rem); line-height: 1.25; opacity: 0; transform: translateX(30px); transition: opacity 700ms var(--ease) var(--d, 0ms), transform 700ms var(--ease) var(--d, 0ms); }
+.is-active .verdicts-big li { opacity: 1; transform: none; }
+.pt--end { min-height: 80vh; }
+.pt--end .links { margin-top: 2.25rem; display: flex; gap: 2rem; justify-content: center; font-size: var(--fs-body); }
+.pt--end .links a { padding-bottom: 2px; }
+.flow-page .btn { background: var(--ink); color: var(--paper); }
+@media (max-width: 860px) {
+  .flow__line { left: 22px; }
+  .pt__node { left: 22px; }
+  .pt { grid-template-columns: 1fr; gap: 1.5rem; padding-left: 3.25rem; min-height: 56vh; }
+  .pt--L .pt__text, .pt--R .pt__text, .pt--C .pt__text { grid-column: 1; text-align: left; --tx: 30px; }
+  .pt--L .pt__text p { margin-left: 0; }
+  .pt--L .pt__vis, .pt--R .pt__vis { grid-column: 1; grid-row: auto; justify-self: start; --tx: 30px; }
+  .pt--C { text-align: left; justify-items: start; }
+  .pt--C p { margin-left: 0; }
+  .pt--C .pt__text { padding: 0; background: none; }
+  .pt--end .links { justify-content: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pt__text, .pt__vis { opacity: 1; transform: none; }
+  .fade-in, .agent-lines li, .verdicts-big li { opacity: 1; transform: none; clip-path: none; transition: none; }
+}
