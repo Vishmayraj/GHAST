@@ -226,3 +226,31 @@ async def test_build_tools_registers_pattern_classifier_as_neutral_stub_by_defau
     from orchestrator.state_machine import FlaggedAnomaly
     result = await tools["pattern_classifier"](FlaggedAnomaly(1, NOW, 0.1, "x", 0.0, 0.0))
     assert result["available"] is False
+
+
+@pytest.mark.asyncio
+async def test_long_gap_before_a_report_cannot_flag_it_and_is_counted() -> None:
+    rows = make_rows(111)
+    for row in rows[15:]:  # a 40 minute silence before report 15, then normal cadence
+        row["received_at"] += timedelta(minutes=40)
+    recorder = Recorder()
+    store = FakeStore({111: rows})
+    store.now = rows[-1]["received_at"] + timedelta(seconds=1)
+    scorer = build(store, errors_with(15, OPERATING_THRESHOLD * 500), recorder, window_max_age_hours=24.0)
+
+    summary = await scorer.poll_once()
+
+    assert summary.windows_scored == 1 and summary.investigated == 0
+    assert summary.skipped_unscorable == 1
+
+
+@pytest.mark.asyncio
+async def test_sentinel_coordinate_cannot_flag_a_report() -> None:
+    rows = make_rows(111)
+    rows[15]["latitude"], rows[15]["longitude"] = 91.0, 181.0
+    recorder = Recorder()
+    scorer = build(FakeStore({111: rows}), errors_with(15, OPERATING_THRESHOLD * 500), recorder)
+
+    summary = await scorer.poll_once()
+
+    assert summary.investigated == 0 and summary.skipped_unscorable >= 1

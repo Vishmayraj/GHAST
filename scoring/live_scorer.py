@@ -70,6 +70,7 @@ from features.extract import (  # noqa: E402
     MISSING_VALUE, N_FEATURES, SOG_INDEX,
 )
 from features.pipeline import WINDOW_LENGTH, FeatureWindow, window_rows  # noqa: E402
+from features.quality import transition_reasons  # noqa: E402
 from models.bilstm.threshold import OPERATING_THRESHOLD  # noqa: E402
 from orchestrator.state_machine import (  # noqa: E402
     FlaggedAnomaly, InvestigationResult, Persist, Tool, investigate, persist_incident,
@@ -154,6 +155,7 @@ class CycleSummary:
     deferred: int = 0
     investigated: int = 0
     failed: int = 0
+    skipped_unscorable: int = 0
 
     def __str__(self) -> str:
         return " ".join(f"{name}={value}" for name, value in vars(self).items())
@@ -253,9 +255,14 @@ def evaluate_window(
     so "two detectors agree" means they agree on the same report, not on the window.
     """
     observations = window_observations(window, errors)
+    # Transitions the model cannot fairly score (sentinel coordinates, long silences, bad time
+    # steps, antimeridian crossings) never vote; see features/quality.py.
+    unscorable = transition_reasons(window.positions, window.timestamps)
     best: tuple[tuple[int, float, int], int, frozenset[str]] | None = None
     for index in range(1, len(observations)):
         if window.timestamps[index] <= cutoff:
+            continue
+        if unscorable[index] is not None:
             continue
         votes = detector_votes(observations[index], thresholds)
         if len(votes) < min_votes or not votes:
@@ -338,6 +345,10 @@ class LiveScorer:
             errors = await asyncio.to_thread(self._score_errors, window)
             summary.windows_scored += 1
             self._last_scored[mmsi] = window.timestamps[-1]
+            skipped = transition_reasons(window.positions, window.timestamps)
+            summary.skipped_unscorable += sum(
+                1 for i, r in enumerate(skipped) if r is not None and window.timestamps[i] > cutoff
+            )
             anomaly = evaluate_window(window, errors, cutoff, config.thresholds, config.min_votes)
             if anomaly is not None:
                 previous = candidates_by_mmsi.get(anomaly.mmsi)
