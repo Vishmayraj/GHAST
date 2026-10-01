@@ -11,9 +11,9 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
 | `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 36 | `ml/` |
-| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review` | 82 | `agent/` |
+| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report` | 96 | `agent/` |
 | `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py` | 19 | `scoring/` |
-| total | 22 files | 173 | |
+| total | 23 files | 187 | |
 
 The ML total is 64. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 57 cases for its 13 functions. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
 
@@ -69,7 +69,7 @@ Evaluation: precision, recall, F1 and confusion counts; the harness on a 25-row 
 
 Agent: `form_hypothesis` tiers, the exact boundary around `OPERATING_THRESHOLD`, single-detector cap, detector corroboration in evidence, freeze tiering and its backward compatibility, jamming priority, `investigate` audit trail and persistence, the Laya tool (stub, prediction passthrough, shared summary text, too little history, exceptions) and the vote rules, report input compaction and error handling, track history and jamming zone queries via fake connections.
 
-Agent additions in the trust pass: the freeze minimum (3 frozen pairs) and 20-report window, `track_history` stopping at the flag with an opt-in `after` slice, the two `incident_history` queries and `targeted_spoof` depending only on `same_vessel`, Laya agreeing only with the hypothesis's own label, the weak-isolated-flag `benign` rule, no drafted report for `benign`, `window_start`/`window_end` on the persisted row, and the review CLI functions (list, show, verdict, refusing to overwrite, unknown ids and verdicts) against a fake connection.
+Agent additions in the trust pass: the freeze minimum (3 frozen pairs) and 20-report window, `track_history` stopping at the flag with an opt-in `after` slice, the two `incident_history` queries and `targeted_spoof` depending only on `same_vessel`, Laya agreeing only with the hypothesis's own label, the weak-isolated-flag `benign` rule, no drafted report for `benign`, `window_start`/`window_end` on the persisted row, the review CLI functions (list, show, verdict, refusing to overwrite, unknown ids and verdicts) against a fake connection, and the on-demand report gate (`test_on_demand_report`: threshold, stored text reused, `--force`, provider failure stores nothing, concurrent loser).
 
 Scoring: the flag carries the scored window's bounds, a high error triggers `investigate`, a low error does not, a frozen position votes with zero error, `--min-votes 2`, open-incident debounce, no re-investigation on the next poll, per-cycle cap with deferral and retry, short-history skip, `build_tools` registering the classifier stub. `test_review_stats.py` covers the two precision definitions, `unclear` leaving the denominator, the `unresolved` hypothesis never being a hit, and the "too few to trust" and per-row markers.
 

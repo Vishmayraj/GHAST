@@ -33,7 +33,7 @@ Not in compose: ML training, evaluation, the historical importer, and a backend 
 AISStream (wss, external) --> ingestion --> timescaledb   asyncpg, DSN host "timescaledb"
                                         --> minio         minio SDK, endpoint "minio:9000"
 timescaledb <-- scoring                                   asyncpg, same DSN
-scoring --> Groq API (https, external, optional)          report drafting only
+review CLI / backend --> Groq API (https, external, optional)   report drafting on request only
 scoring --> Laya model (in process, optional)             loaded from /laya_model
 frontend (nginx)                                          no connection to any other service
 ```
@@ -63,7 +63,7 @@ Compose reads `infra/docker/.env`. Host-run Python code reads the process enviro
 | `GHAST_CHECKPOINT` | scorer | none | compose hardcodes `/checkpoints/epoch_010.pt` |
 | `GHAST_LAYA_MODEL` | scorer | unset means neutral stub | compose passes `${GHAST_LAYA_MODEL:-}` |
 | `WITH_LAYA` | scoring image build arg | 0 | `1` installs `laya` |
-| `GROQ_API_KEY` | scorer (Groq client reads it) | unset means no reports | |
+| `GROQ_API_KEY` | on-demand report drafting (`agent/review.py report`), not the scorer | unset means no reports can be drafted | no longer passed to the scoring container |
 | `GHAST_REPORT_MODEL` | `report_generator/report.py` | `openai/gpt-oss-120b` | |
 | `GHAST_REPORT_MAX_TOKENS` | `report_generator/report.py` | 1200 | |
 | `MLFLOW_TRACKING_URI` | `score_checkpoint.py` | `sqlite:///mlruns/mlflow.db` | path is relative to the working directory, so `ml/mlruns/` when run from `ml/` |

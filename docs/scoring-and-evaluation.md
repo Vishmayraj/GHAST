@@ -104,7 +104,7 @@ python scoring/live_scorer.py ... --once --initial-lookback-minutes 360
 
 Flags: `--dsn` (or `POSTGRES_DSN`), `--checkpoint` (or `GHAST_CHECKPOINT`), `--poll-interval-seconds` (30), `--debounce-hours` (6), `--min-votes` (1 by default; the Docker `CMD` passes 2), `--freeze-replay-threshold` (0.5), `--speed-jump-threshold` (unset), `--max-investigations-per-cycle` (25), `--initial-lookback-minutes` (30), `--laya-model` (or `GHAST_LAYA_MODEL`), `--device` (default `cpu`), `--once`. It exits with code 2 if `OPERATING_THRESHOLD` is `None`.
 
-Startup: loads the repo-root `.env` if present, loads the checkpoint on CPU once, creates an `AsyncGroq` client if `GROQ_API_KEY` is set, loads Laya if configured (a load failure is logged and the tool stays a neutral stub), opens an asyncpg pool (1 to 3 connections).
+Startup: loads the repo-root `.env` if present, loads the checkpoint on CPU once, loads Laya if configured (a load failure is logged and the tool stays a neutral stub), opens an asyncpg pool (1 to 3 connections).
 
 ### One cycle (`poll_once`)
 

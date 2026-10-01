@@ -13,7 +13,7 @@ This is the current Stage 1 pipeline, based on the code in this checkout:
       -> scoring/live_scorer.py
       -> bounded agent investigation
       -> incidents table
-      -> optional Groq report draft
+      -> (later, on request) Groq report draft
 
 ## Get the infrastructure and data path running
 
@@ -104,7 +104,7 @@ the same report. Start with one database cycle:
     python scoring\live_scorer.py --once --min-votes 2
 
 --min-votes 2 is the safer initial live setting. The default of one preserves
-recall but single-detector flags are escalated rather than auto-reported.
+recall but single-detector flags are escalated rather than reported.
 
 The scorer permits 25 investigations per polling cycle by default
 (`--max-investigations-per-cycle`). Strongest candidates run first; candidates beyond
@@ -119,12 +119,11 @@ Jamming can report at 0.85 confidence; freeze/replay corroboration at 0.8;
 a single detector caps other non-benign hypotheses at 0.5. Below-threshold is
 benign only when no other detector voted.
 
-Reports are the only LLM call. The scorer loads the repository-root ignored .env
-without overriding process environment values. If GROQ_API_KEY is present,
-live_scorer creates Groq AsyncGroq and report_generator/report.py uses
-openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to select a Groq model and
-GHAST_REPORT_MAX_TOKENS to change the 1200-token default. Without a key,
-incidents persist without report_text.
+Reports are the only LLM call, and they are drafted only on request: the scorer never
+calls Groq. `python review.py report <incident-id>` (from agent/, with GROQ_API_KEY set)
+drafts one for an incident at or above REPORT_DRAFT_CONFIDENCE_THRESHOLD, using
+report_generator/report.py with openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to
+select a Groq model and GHAST_REPORT_MAX_TOKENS to change the 1200-token default.
 
 ## Laya pattern classifier (optional)
 

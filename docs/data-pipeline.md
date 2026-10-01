@@ -156,7 +156,8 @@ One row per investigation, written by `agent/orchestrator/state_machine.py::pers
 | `confidence` | DOUBLE PRECISION | |
 | `status` | TEXT NOT NULL | CHECK in `reported, escalated, resolved`; the agent writes the first two, `agent/review.py` sets `resolved` when it records a verdict |
 | `evidence`, `tool_call_log` | JSONB | full tool outputs and the ordered call log |
-| `report_text` | TEXT | NULL unless the Groq report succeeded |
+| `report_text` | TEXT | NULL until an analyst requests a report and it succeeds (`agent/report_generator/on_demand.py`) |
+| `report_generated_at` | TIMESTAMPTZ | when `report_text` was stored |
 | `review_verdict` | TEXT | analyst verdict, CHECK in `confirmed_spoof, jamming, equipment_fault, benign, unclear`; NULL until reviewed |
 | `reviewed_by`, `reviewed_at`, `review_notes` | TEXT, TIMESTAMPTZ, TEXT | set with the verdict by `agent/review.py` |
 | `created_at`, `updated_at` | TIMESTAMPTZ | `updated_at` has no trigger; the review CLI sets it when it records a verdict |

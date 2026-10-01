@@ -45,7 +45,7 @@ vessel_position (live rows)
                 pattern_classifier (Laya, optional)   <- inside the agent, before the decision
          freeze corroboration from track_history
          form_hypothesis: fixed rules -> hypothesis, confidence
-         confidence >= 0.7 -> status reported (+ optional Groq report text)
+         confidence >= 0.7 -> status reported (no report text; drafted later on request)
          otherwise         -> status escalated
     -> incidents table row
 

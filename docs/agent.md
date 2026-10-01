@@ -1,6 +1,6 @@
 # Agent and orchestrator
 
-The investigation layer in `agent/`. It takes one flagged report from the live scorer, gathers evidence with four tools, applies fixed rules to form a hypothesis and a confidence, writes an `incidents` row, and optionally has an LLM draft a text report. Only the report is model-written. Everything that decides the hypothesis is deterministic code.
+The investigation layer in `agent/`. It takes one flagged report from the live scorer, gathers evidence with four tools, applies fixed rules to form a hypothesis and a confidence, and writes an `incidents` row. No LLM runs during the investigation. An analyst can ask for an LLM-drafted text report on a stored incident afterwards, and only the report is model-written. Everything that decides the hypothesis is deterministic code.
 
 Entry point: `agent.orchestrator.state_machine.investigate()`. Its caller is `scoring/live_scorer.py` (`docs/scoring-and-evaluation.md`). Nothing else in the repo calls it except tests.
 
@@ -14,10 +14,10 @@ Entry point: `agent.orchestrator.state_machine.investigate()`. Its caller is `sc
 | `pattern_classifier` | code is deterministic | Laya model, optional |
 | freeze corroboration | yes | none |
 | hypothesis and confidence | yes, `form_hypothesis` | none |
-| report or escalate | yes, confidence at or above 0.7 | none |
-| report text | no | Groq chat model, optional |
+| reported or escalated | yes, confidence at or above 0.7 | none |
+| report text, on request only | no | Groq chat model, optional |
 
-No web search or external lookup exists anywhere in the agent. The only external call is the Groq report request. "Jamming zone" knowledge comes from the `jamming_zones` table, which nothing populates (`docs/data-pipeline.md`).
+No web search or external lookup exists anywhere in the agent. The only external call is the Groq report request, made only when an analyst asks for a report. "Jamming zone" knowledge comes from the `jamming_zones` table, which nothing populates (`docs/data-pipeline.md`).
 
 ## Flow
 
@@ -30,7 +30,7 @@ FlaggedAnomaly (mmsi, flagged_at, score, anomaly_type, lat, lon, detector_votes)
   5. freeze corroboration -> evidence["freeze_corroboration"] (computed from the last 20 reports of step 1, not a tool call)
   6. detector votes       -> evidence["detector_corroboration"]
   7. form_hypothesis(anomaly, evidence) -> (hypothesis, confidence)
-  8. confidence >= 0.7 ? status "reported" (+ optional LLM report, never for benign) : status "escalated"
+  8. confidence >= 0.7 ? status "reported" : status "escalated" (no report text either way)
   9. persist one incidents row (including window_start and window_end from the scored window)
 ```
 
@@ -96,7 +96,7 @@ Consequences of the rules as written:
 
 - Row 3 still cannot be reached from the live scorer. A flag is only produced when at least one detector voted, and the `prediction_error` vote requires a score above the threshold, so a flag with a below-threshold score must carry a `freeze_replay` or `speed_jump` vote, which blocks row 3. Row 4b is what makes `benign` reachable from a real flag: it needs a `prediction_error`-only vote barely over the threshold on a stationary window.
 - Row 5 versus 6 depends only on this vessel's own history. A first incident for a vessel is `targeted_spoof` whatever the fleet has seen. A second incident on the same vessel resolves to `equipment_fault` and is escalated, unless freeze corroboration matched (row 4). Whether "a vessel with earlier incidents is more likely faulty equipment" is the right reading is a judgement the reviewed incidents should test, not a measured fact.
-- Row 1 outranks everything, and a matched zone gives a report even for a flag with a single vote.
+- Row 1 outranks everything, and a matched zone gives a reported, report-eligible incident even for a flag with a single vote.
 - `resolved` is set only by an analyst verdict through `agent/review.py`. No rule in the agent sets it.
 - The confidences (0.85, 0.8, 0.72, 0.55, 0.75, cap 0.5), the 0.7 report threshold, and the constants listed under the tier table are hand-set. `scoring/review_stats.py` is where they get checked against reviewed incidents; nothing has calibrated them yet.
 
@@ -108,16 +108,24 @@ The minimum keeps one bad SOG at rest (a single frozen pair) from matching. 3 is
 
 ## Report generation
 
-`agent/report_generator/report.py::draft_report(incident, client)` is called only for `reported` incidents whose hypothesis is not `benign`, and only if the scorer built a Groq client (`GROQ_API_KEY` set). The scorer wraps it so any exception returns an empty string; the incident is stored with `report_text` NULL.
+Reports are never drafted during scoring or investigation, so no tokens and no report storage are spent on incidents nobody opens. `agent/report_generator/on_demand.py::generate_report(db, incident_id, client, force=False)` is the one place a report is written. It:
+
+1. loads the stored incident (not found: `not_found`),
+2. returns the stored text if there is one (`already_drafted`, no model call) unless `force` is set,
+3. refuses unless `confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD` (`not_eligible`, no model call),
+4. calls `draft_report(incident, client)`; an exception or empty text gives `failed` and stores nothing,
+5. stores `report_text` and `report_generated_at`, only while `report_text` is still NULL unless `force` (a concurrent loser gets the winner's text back as `already_drafted`).
+
+`REPORT_DRAFT_CONFIDENCE_THRESHOLD` is 0.8 in `state_machine.py`, above the 0.7 reported/escalated line. With today's tiers that admits `jamming` (0.85) and a corroborated `freeze_replay` (0.8), and leaves `targeted_spoof` (0.72), `equipment_fault` (0.55) and `benign` (0.75) out. It is an uncalibrated placeholder. The callers are `python review.py report <id>` (the stand-in for a dashboard button) and, later, a backend endpoint (`ImplementationPlans/02_Delivery_Layer.md`).
 
 - Client: `groq.AsyncGroq(max_retries=0)`. Model: `GHAST_REPORT_MODEL`, default `openai/gpt-oss-120b`. Output cap: `GHAST_REPORT_MAX_TOKENS`, default 1200. (`docs/DEVELOPER_GUIDE.md` says 2000; the code and `agent/report_generator/README.md` say 1200.)
 - The prompt is fixed text (`REPORT_PROMPT_PREFIX`) followed by compact JSON: the decision fields plus a summary of evidence (position count, first and last position of `track_history`, and the full zone, history, freeze, detector and classifier results). Full track history is deliberately left out.
 - The prompt asks for a fixed markdown structure with a small mermaid diagram and at most three analyst actions. It tells the model not to invent facts. Nothing checks the output against the input. The analyst actions in `ghast_latest_report.md` (request more AIS, cross-check radar or VMS) are model-written suggestions, not agent output.
-- Reports are not used by any other code.
+- Reports are not used by any other code. The scoring service has no Groq dependency and does not read `GROQ_API_KEY`.
 
 ## Persistence
 
-`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text, window_start, window_end`. Evidence and log are JSON with `default=str` for datetimes. `window_start` and `window_end` are the first and last report times of the scored window, carried on the `FlaggedAnomaly` by `scoring/live_scorer.py::evaluate_window`; they are NULL for callers that do not set them, and for incidents stored before this change. `updated_at` is left to its column default. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
+`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, window_start, window_end`. `report_text` and `report_generated_at` stay NULL until a report is requested. Evidence and log are JSON with `default=str` for datetimes. `window_start` and `window_end` are the first and last report times of the scored window, carried on the `FlaggedAnomaly` by `scoring/live_scorer.py::evaluate_window`; they are NULL for callers that do not set them, and for incidents stored before this change. `updated_at` is left to its column default. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
 
 ## Analyst review
 
@@ -131,6 +139,7 @@ python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAM
 ```
 
 - `list`: incidents with `review_verdict IS NULL`, newest first, each with hypothesis, confidence, status, votes (`anomaly_type`), the scored window span, and whether a report is stored (with the `show` command to read it).
+- `report`: drafts the LLM report for one incident on request (`--force` drafts again), needs `GROQ_API_KEY`, and prints the text. Only incidents at or above `REPORT_DRAFT_CONFIDENCE_THRESHOLD` are eligible; `list` and `show` say whether one can be drafted.
 - `show`: the stored evidence (the raw position list collapsed to its count and first and last rows; `tool_call_log` is left out because it repeats the evidence), the 20-report summary text the Laya classifier reads, rebuilt from the stored `track_history` with `features.summary.summarize_rows`, and the stored report. If fewer than 20 reports are stored up to the flag it says so instead of summarizing.
 - `verdict`: one of `confirmed_spoof`, `jamming`, `equipment_fault`, `benign`, `unclear`. It sets `review_verdict`, `reviewed_by` (defaults to the OS user), `reviewed_at`, `review_notes`, and `status = 'resolved'`. An existing verdict is not replaced unless `--force` is given.
 
@@ -138,14 +147,14 @@ python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAM
 
 ## Tests
 
-`agent/tests` (82 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling (including the hypothesis-to-label mapping) and failure isolation, freeze corroboration (minimum pairs, 20-report window), the weak-isolated-flag benign rule, window columns on the persisted row, report input compaction and error handling, tool queries against fake connections (`track_history` bounds and the opt-in `after` slice, the two `incident_history` queries), and the review CLI functions against a fake connection. See `docs/testing.md` for the run and skip conditions. Not covered by the committed tests: real SQL against PostGIS and TimescaleDB, and Groq calls. The new incidents SQL (schema columns, the history and review queries, `persist_incident` with window columns) and the new `track_history` queries were run by hand against a scratch PostgreSQL 16 with PostGIS and a plain `vessel_position` table, which is not TimescaleDB.
+`agent/tests` (96 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling (including the hypothesis-to-label mapping) and failure isolation, freeze corroboration (minimum pairs, 20-report window), the weak-isolated-flag benign rule, window columns on the persisted row, report input compaction and error handling, tool queries against fake connections (`track_history` bounds and the opt-in `after` slice, the two `incident_history` queries), and the on-demand report gate (threshold, stored text reused, force, provider failure stores nothing, concurrent loser), and the review CLI functions against a fake connection. See `docs/testing.md` for the run and skip conditions. Not covered by the committed tests: real SQL against PostGIS and TimescaleDB, and Groq calls. The new incidents SQL (schema columns, the history and review queries, `persist_incident` with window columns) and the new `track_history` queries were run by hand against a scratch PostgreSQL 16 with PostGIS and a plain `vessel_position` table, which is not TimescaleDB.
 
 ## Status
 
 | Piece | State |
 |---|---|
 | tools, `form_hypothesis`, `investigate`, persistence | implemented, unit tested with fakes |
-| Groq report drafting | implemented, tested with a fake client; one real report is committed as `ghast_latest_report.md` |
+| Groq report drafting | implemented, on request only (`review.py report`, threshold 0.8), tested with a fake client; one real report from the earlier automatic path is committed as `ghast_latest_report.md` |
 | Laya vote | implemented, tested with fakes; no fine-tuned model runs by default (`docs/laya_pattern_classifier.md`) |
 | confidence values and thresholds | hand-set, uncalibrated |
 | analyst review (`agent/review.py`, `scoring/review_stats.py`) | implemented, unit tested with fakes; no incident has been reviewed yet |
