@@ -62,7 +62,7 @@
     var pred = track.filter(function (t, i) { return i % 3 === 0; }).map(function (t) { return '<circle cx="' + X(t.predicted_lon).toFixed(1) + '" cy="' + Y(t.predicted_lat).toFixed(1) + '" r="3.5" fill="none" stroke="#5a6674" stroke-width="1.3"/>'; }).join("");
     var fl = track.filter(function (t) { return t.flagged; }).map(function (t) { return '<circle cx="' + X(t.lon).toFixed(1) + '" cy="' + Y(t.lat).toFixed(1) + '" r="6" fill="#d8431f"/>'; }).join("");
     el.innerHTML = '<svg class="map" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Vessel track with the flagged report marked">' + g + land + zs +
-      '<polyline points="' + line + '" fill="none" stroke="#1f4e79" stroke-width="2"/>' + pred + fl + "</svg>" +
+      '<polyline class="map-track" points="' + line + '" fill="none" stroke="#1f4e79" stroke-width="2"/>' + pred + fl + "</svg>" +
       '<div class="map__legend"><span>Solid line: reported track</span><span>Open circles: predicted positions</span><span>Red: flagged report</span></div>';
   }
 

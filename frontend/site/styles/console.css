@@ -10,7 +10,7 @@
 .queue { border-right: 1px solid var(--rule); }
 .queue__filters { display: flex; gap: 0.5rem; padding: 1rem 1rem 1rem 0; border-bottom: 1px solid var(--rule); }
 .queue__filters select { flex: 1; min-width: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 2px; padding: 0.45rem 0.5rem; font-size: var(--fs-small); }
-.row { display: grid; grid-template-columns: 14px 1fr auto; gap: 0 0.5rem; align-items: baseline; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--rule); padding: 1rem 1rem 1rem 0; cursor: pointer; }
+.row { display: grid; grid-template-columns: 14px 1fr auto; gap: 0 0.5rem; align-items: baseline; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--rule); padding: 0.85rem 1rem 0.85rem 0; cursor: pointer; transition: background 160ms; }
 .row:hover { background: var(--paper-deep); }
 .row[aria-current="true"] { background: var(--paper-deep); }
 .row__dot { width: 6px; height: 6px; background: var(--signal); align-self: center; }
@@ -20,12 +20,19 @@
 .row__num { text-align: right; }
 .queue__msg { padding: 2rem 1rem 2rem 0; color: var(--ink-3); font-size: var(--fs-small); }
 
-.detail { padding: 2rem 0 5rem 2.5rem; min-width: 0; }
+.detail { padding: 1.5rem 0 3rem 2.5rem; min-width: 0; animation: rise 600ms var(--ease) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.map-track { stroke-dasharray: 1400; stroke-dashoffset: 1400; animation: trace 1800ms var(--ease-io) 150ms forwards; }
+@keyframes trace { to { stroke-dashoffset: 0; } }
+.block { animation: rise 700ms var(--ease) both; }
+.block:nth-of-type(2) { animation-delay: 80ms; } .block:nth-of-type(3) { animation-delay: 160ms; } .block:nth-of-type(4) { animation-delay: 240ms; } .block:nth-of-type(5) { animation-delay: 320ms; } .block:nth-of-type(6) { animation-delay: 400ms; }
+.row { animation: rise 500ms var(--ease) both; }
+@media (prefers-reduced-motion: reduce) { .detail, .block, .row { animation: none; } .map-track { animation: none; stroke-dashoffset: 0; } }
 .detail__back { display: none; background: none; border: 0; padding: 0 0 1rem; text-decoration: underline; text-underline-offset: 6px; cursor: pointer; font-size: var(--fs-small); }
 .detail h2 { font-size: clamp(1.75rem, 1.2rem + 1.8vw, 2.75rem); margin: 0.5rem 0 0.25rem; }
 .detail h2 .flag { color: var(--signal); }
 .detail__meta { display: flex; flex-wrap: wrap; gap: 0.25rem 1.5rem; color: var(--ink-3); }
-.block { margin-top: 2.5rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+.block { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--rule); }
 .block h3 { font-family: var(--font-sans); font-size: var(--fs-small); font-weight: 500; letter-spacing: 0; margin-bottom: 1rem; }
 .block ul li { padding: 0.35rem 0; max-width: 64ch; }
 .map { width: 100%; height: auto; background: var(--sea-tint); }
