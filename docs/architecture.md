@@ -6,18 +6,18 @@ How the pieces fit together as of this checkout. Written from the code; where it
 |---|---|
 | `docs/data-pipeline.md` | ingestion, historical import, MinIO archive, schema, live versus historical rows |
 | `docs/infrastructure.md` | compose stack, services, environment variables, what a local run needs |
-| `docs/ml-pipeline.md` | features, windows, BiLSTMNextDelta, training, checkpoints, synthetic injectors |
+| `docs/ml-pipeline.md` | features, windows, BiLSTMNextDelta, training, checkpoints |
 | `docs/scoring-and-evaluation.md` | `score_checkpoint`, detectors, threshold, live scorer |
 | `docs/agent.md` | investigation flow, tools, hypothesis rules, report drafting |
 | `docs/laya_pattern_classifier.md` | Laya export, model, benchmark, how the agent uses its vote |
 | `docs/backend-and-frontend.md` | there is no backend; the site is static |
 | `docs/testing.md` | test map, CI, gaps |
 | `docs/DEVELOPER_GUIDE.md` | older recovery guide (partly superseded by the above) |
-| `docs/HLD/`, `ImplementationPlans/` | design intent and plans, not descriptions of the current system |
+| `docs/HLD/`, `docs/hld-vs-current.md`, `ImplementationPlans/` | design intent, the gap between it and now, and the plans to close it; not descriptions of the current system |
 
 ## What GHAST is right now
 
-A pipeline that stores AIS position reports, trains a small BiLSTM to predict each vessel's next position step, flags reports whose prediction error (or a simple rule) looks abnormal, and runs a fixed-rule investigation that writes an incident row. It has been evaluated only on synthetic spoofs injected into historical data. A committed incident report (`ghast_latest_report.md`) suggests it has produced at least one incident on live data; the repo does not record how that run was made. There is no API and no dashboard.
+A pipeline that stores AIS position reports, trains a small BiLSTM to predict each vessel's next position step, flags reports whose prediction error (or a simple rule) looks abnormal, and runs a fixed-rule investigation that writes an incident row. It has never been evaluated against real spoofing: real traffic has no labels, and the synthetic-spoof evaluation it used to have was removed. A committed incident report (`ghast_latest_report.md`) suggests it has produced at least one incident on live data; the repo does not record how that run was made. There is no API and no dashboard.
 
 ## End-to-end flow, corrected
 
@@ -56,9 +56,11 @@ MarineCadastre CSV -> scripts/import_marinecadastre.py -> vessel_position (messa
 vessel_position (historical or live rows)
     -> ml/features: 20-report windows
     -> ml/training: shard cache, mini-batch train -> checkpoints/epoch_NNN.pt
-    -> ml/evaluation/score_checkpoint.py: held-out vessels, synthetic spoof injection,
-         threshold sweep -> value copied by hand into ml/models/bilstm/threshold.py
-    -> ml/evaluation/laya_export.py: injected window summaries -> data/laya/*.jsonl
+    -> ml/evaluation/score_checkpoint.py: held-out vessels, real windows only, rates report
+         (error percentiles, vote rates, flag rate, threshold for a target flag rate)
+         -> value copied by hand into ml/models/bilstm/threshold.py
+    -> ml/evaluation/laya_export.py queue: real window summaries -> review queue
+         -> a person labels it -> laya_export.py build -> data/laya/*.jsonl
          -> fine-tune Laya elsewhere (Kaggle) -> ml/laya_model/ (weights not in repo)
 
                  NOT CONNECTED
@@ -68,12 +70,12 @@ backend/ (no code) and frontend/ (static site, mock data): nothing reads inciden
 
 What differs from the brief's diagram:
 
-1. Training and scoring are two separate processes joined only by a checkpoint file and a constant. "BiLSTMNextDelta then scoring" happens twice: offline in `score_checkpoint.py` on injected windows, and live in `live_scorer.py` on real reports.
+1. Training and scoring are two separate processes joined only by a checkpoint file and a constant. "BiLSTMNextDelta then scoring" happens twice: offline in `score_checkpoint.py` on real held-out windows, and live in `live_scorer.py` on real reports.
 2. The BiLSTM is one of three detectors, not the whole detector. The rule detectors run on the same window.
 3. Laya is not a stage after the agent. It is one of the agent's tools, called before `form_hypothesis`, and its vote can only lift or apply a confidence cap.
 4. The agent has no separate "hypothesis handling" stage after detection. It gathers evidence and forms the hypothesis in one call.
 5. The final result is a row in `incidents`. Backend and frontend are not downstream of it.
-6. Laya's training data comes from the offline path (injected summaries), not from the live path or from real incidents.
+6. Laya's training data is meant to come from human-labeled real windows. The model currently in use was trained on injected windows that have since been removed, so it has never seen a real labeled event.
 
 ## Components and where they live
 
@@ -81,7 +83,7 @@ What differs from the brief's diagram:
 ingestion/            AISStream client, normalizer, TimescaleDB writer, MinIO archiver
 scripts/              import_marinecadastre.py (historical loader)
 backend/models/       schema.sql (the only backend content)
-ml/features/          extract, pipeline (windows), inject (synthetic spoofs), summary (Laya text)
+ml/features/          extract, pipeline (windows), summary (Laya text)
 ml/models/bilstm/     model, infer, threshold
 ml/training/          train, dataset_cache, window_policy
 ml/evaluation/        score_checkpoint, baselines, harness, datasets, metrics, laya_export
@@ -98,7 +100,7 @@ Imports are flat per package (`from features.extract import ...`), and `scoring/
 
 ## Data, derived data, model artifacts
 
-The full table is in `docs/ml-pipeline.md`. In short: PostgreSQL holds source data; `data/laya/*.jsonl`, shard caches and injected windows are derived experiment data; `epoch_NNN.pt`, the Laya model directory and MLflow runs are model artifacts. None of the model artifacts that matter are in git.
+The full table is in `docs/ml-pipeline.md`. In short: PostgreSQL holds source data; the Laya review queue and labeled files (once they exist) and shard caches are derived experiment data; `epoch_NNN.pt`, the Laya model directory and MLflow runs are model artifacts. None of the model artifacts that matter are in git.
 
 ## Current status by component
 
@@ -110,14 +112,13 @@ The full table is in `docs/ml-pipeline.md`. In short: PostgreSQL holds source da
 | schema | yes | no | yes | no migrations |
 | feature extraction and windows | yes | yes (fakes) | yes | |
 | BiLSTM training | yes | partly (helpers, not the epoch loop) | yes | `epoch_010.pt`, file not in repo |
-| synthetic injectors | yes | yes | yes | features not recomputed after injection |
 | `score_checkpoint` | yes | helpers only | yes, elsewhere | results not reproducible from repo |
 | threshold 0.004946 | yes | boundary tests | yes | chosen and reported on the same set |
 | live scorer | yes | with fakes | yes | one recorded incident report |
 | agent and tools | yes | with fakes | yes | rules and confidences are hand-set |
 | Groq report | yes | fake client | yes | one committed report |
-| Laya export | yes | synthetic windows | yes | committed snapshot predates the gate |
-| Laya model | trained once | benchmark recorded | not by default | weights not in repo; uncalibrated threshold |
+| Laya export (review queue, human labels) | yes | hand-built windows | no | `queue` not yet run against the database; no labels exist |
+| Laya model | trained once, on removed injected data | benchmark recorded (injected data) | not by default | weights not in repo; uncalibrated threshold; never saw real labels |
 | backend API | no | no | no | README only |
 | dashboard | no | no | no | README only |
 | landing site | yes | no | serves static files | mock data |
@@ -134,21 +135,20 @@ Proposed and not built: per-vessel-class or per-region thresholds, fleet-wide cl
 
 Currently broken or misleading:
 
-- `python -m evaluation.harness --dataset injected_synthetic` cannot work (async loader behind a synchronous CLI).
-- Docs commands using `--eval-start 2026-05-01` read no rows (only April was imported).
-- The committed Laya notebook is upstream Laya's, not the adapted one that trained the model.
-- `agent/README.md`, `agent/orchestrator/README.md`, `agent/tools/README.md`, `ml/README.md`, `ml/training/README.md`, `ml/evaluation/README.md`, `infra/docker/README.md`, `README.md` describe an earlier state (list below).
+- Historical evaluation commands must use an April 2026 range (only April was imported).
+- `notebooks/laya_finetune_ghast_kaggle_2xT4.ipynb` reads `data/laya/train.jsonl` and `holdout.jsonl`, which no longer exist until real labeled data is built.
+- `agent/README.md`, `agent/orchestrator/README.md`, `agent/tools/README.md`, `ml/README.md`, `ml/training/README.md`, `infra/docker/README.md`, `README.md` describe an earlier state (list below).
 
 ## Known problems, separate from what works
 
 Modeling and evaluation:
 
-1. Injected evaluation windows carry stale motion features next to altered positions; the freeze detector reads a column the injector never updates. Offline detector numbers measure a different input than live scoring sees.
+1. There is no quality measurement. The synthetic-spoof evaluation was removed, real traffic has no labels, and `OPERATING_THRESHOLD` is a placeholder from the removed evaluation. Offline scoring now reports rates only.
 2. The BiLSTM is bidirectional and gets implied speed as an input, so its "next step prediction" can see the step it predicts through the following row. Not ablated.
 3. The historical-trained model never saw `rate_of_turn` vary, and live rows contain it.
 4. Prediction error is in raw degrees with no time-step input, so its scale depends on reporting interval, which differs by source. The threshold was chosen on historical data only.
-5. The threshold and its F1 (0.424) are tuned and reported on the same held-out set. About 19.4% of clean reports are flagged at that threshold.
-6. Live false positive rate is unmeasured. No evaluation exists on live data or on real spoofing.
+5. The threshold came from F1 against injected spoofs (0.424, tuned and reported on the same set), with 19.4% of clean reports flagged. That number no longer has a source in the repo; re-derive it with `score_checkpoint`'s flag-rate report.
+6. Live flag rate has not been measured. Run `score_checkpoint` with `--source live` and `--source historical` and compare.
 
 Agent behavior:
 
@@ -188,8 +188,6 @@ Details and variables: `docs/infrastructure.md`.
 | `agent/orchestrator/README.md` | four hypotheses without `freeze_replay`; suggests LangGraph |
 | `agent/tools/README.md` | lists three tools |
 | `ml/README.md`, `ml/training/README.md` | describe MLflow configs for training; training does not use MLflow |
-| `ml/models/bilstm/README.md` | says the model is trained and validated on the IEEE synthetic dataset and targets 0.9+ precision and recall; it is trained on MarineCadastre windows |
-| `ml/evaluation/README.md` | two detectors, one loader, 13 tests; now three, two, 33 |
 | `backend/models/README.md` | its second paragraph describes only `vessel_position` and `vessel_static`; the schema also has `incidents` and `jamming_zones` |
-| `ImplementationPlans/*` | plans; several status lines are stale. `Sem5_Evaluation_Followup.md` says `OPERATING_THRESHOLD` must stay `None`; it was set |
+| `ImplementationPlans/old/*` | superseded plans, kept for history; several status lines are stale and they describe the removed synthetic evaluation. Current plans are in `ImplementationPlans/` |
 | `frontend/site/scripts/mock-data.js` | depicts features (DBSCAN check, zone counts, meter deviations, auto-dismiss) that do not exist |

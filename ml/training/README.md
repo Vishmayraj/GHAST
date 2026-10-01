@@ -54,7 +54,7 @@ python -m training.train --dsn $env:POSTGRES_DSN --source live --live-window rol
 ```
 
 The script trains only on clean windows produced from `vessel_position`; it
-does not use injected trajectories as training inputs. `--source historical`
+uses no synthetic or injected trajectories. `--source historical`
 is an explicit development-only path and requires its April bounds, for
 example `--start 2026-04-01T00:00:00+00:00 --end 2026-04-16T00:00:00+00:00`.
 It never silently mixes into live mode. Preserve the resolved data window,
@@ -122,13 +122,15 @@ python -m pytest features\tests training\tests models\bilstm\tests evaluation\te
 
 ## 5. Manual data-path test after training
 
-First confirm that synthetic injection can be built from the same window. This
-is intentionally a local/manual step because it reads the real database:
+Confirm the same window range yields clean windows. This is intentionally a
+local/manual step because it reads the real database:
 
 ```powershell
-python -c "import asyncio; from training.train import select_live_window; from features.pipeline import load_training_windows; from features.inject import build_synthetic_dataset; dsn='postgresql://ghast:ghast@localhost:5432/ghast'; start,end=asyncio.run(select_live_window(dsn, 'initial')); w=asyncio.run(load_training_windows(dsn, start, end, 'live')); print(f'{start.isoformat()} to {end.isoformat()}: {len(w)} clean windows, {len(build_synthetic_dataset(w, seed=0))} injected/control windows')"
+python -c "import asyncio; from training.train import select_live_window; from features.pipeline import load_training_windows; dsn='postgresql://ghast:ghast@localhost:5432/ghast'; start,end=asyncio.run(select_live_window(dsn, 'initial')); w=asyncio.run(load_training_windows(dsn, start, end, 'live')); print(f'{start.isoformat()} to {end.isoformat()}: {len(w)} clean windows')"
 ```
 
-This is not a training-quality pass. A release-quality model result additionally
-requires a thresholded injected-synthetic harness result that beats the speed
-jump baseline; record both result objects before promoting a model.
+This is not a training-quality pass. Before promoting a model, run
+`python -m evaluation.score_checkpoint` for both `--source historical` and
+`--source live` and keep both JSON reports (`--out`). Compare flag rates against the
+checkpoint you are replacing; there are no labels, so this measures behavior on
+real traffic, not accuracy.

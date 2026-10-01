@@ -3,7 +3,7 @@
 
 Core MIP and HLD lie in `docs/HLD/`. For what the code does today, start with `docs/architecture.md`.
 
-Currently building Semester 5 (Stage 1) - see `ImplementationPlans/Sem5IP.md` for the detailed plan this stage is being built against.
+Currently building Semester 5 (Stage 1). What is built and what is missing against the design: `docs/hld-vs-current.md`. What to build next: `ImplementationPlans/README.md`.
 
 ## Quick start
 
@@ -19,7 +19,7 @@ Brings up TimescaleDB, MinIO, ingestion, scoring and the static frontend. Ingest
 
 | Path | What it is |
 |---|---|
-| `ImplementationPlans/` | Stage-scoped implementation plans (start here) |
+| `ImplementationPlans/` | Current implementation plans, in order (`old/` holds superseded plans) |
 | `data/` | Raw archive, research datasets, jamming-zone data |
 | `ingestion/` | AIS feed collector + AIVDM/NMEA normalizer |
 | `ml/` | Feature extraction, Bi-LSTM model, training, evaluation |

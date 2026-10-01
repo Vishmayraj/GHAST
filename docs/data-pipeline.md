@@ -169,7 +169,7 @@ The `ALTER TABLE ... DROP CONSTRAINT / ADD CONSTRAINT` block exists because `fre
 
 ## Preprocessing that happens after the tables
 
-The pipeline does not normalize data inside the database. Feature extraction, window construction and synthetic injection are in `ml/features/` and are described in `docs/ml-pipeline.md`. The only preprocessing on the way in is the normalizer's reshaping and the importer's coercion and region filter described above.
+The pipeline does not normalize data inside the database. Feature extraction and window construction are in `ml/features/` and are described in `docs/ml-pipeline.md`. The only preprocessing on the way in is the normalizer's reshaping and the importer's coercion and region filter described above.
 
 ## Status
 

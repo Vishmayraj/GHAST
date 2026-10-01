@@ -8,7 +8,7 @@ This is the current Stage 1 pipeline, based on the code in this checkout:
       -> vessel_position + vessel_static in PostgreSQL/TimescaleDB
       -> features.pipeline feature windows
       -> BiLSTMNextDelta training checkpoint
-      -> held-out, synthetic-injection checkpoint evaluation
+      -> held-out real-traffic checkpoint scoring (rates, no labels)
       -> prediction error + detector votes
       -> scoring/live_scorer.py
       -> bounded agent investigation
@@ -66,23 +66,22 @@ validation loss 0.0007673). Do not retrain merely to recover this state.
 
 ## Held-out evaluation and threshold
 
-ml/evaluation/score_checkpoint.py selects held-out vessels, injects four
-synthetic patterns into clean windows, calculates BiLSTM prediction errors, and
-sweeps thresholds. It also measures prediction_error_detector,
-speed_jump_detector, and freeze_replay_detector from evaluation/baselines.py.
+ml/evaluation/score_checkpoint.py selects held-out vessels, calculates BiLSTM
+prediction errors on their real windows, and reports rates: error percentiles,
+detector vote rates, flag rate at the operating threshold, and the threshold that
+gives a chosen flag rate. There is no synthetic injection and no F1 (real data has
+no labels).
 
 Run a new evaluation only for a new checkpoint or source range:
 
     cd C:\Projects\GHAST\ml
-    python -m evaluation.score_checkpoint --dsn $env:POSTGRES_DSN --checkpoint checkpoints/epoch_010.pt --source historical --eval-start 2026-05-01 --eval-end 2026-05-16 --seed 0
+    python -m evaluation.score_checkpoint --dsn $env:POSTGRES_DSN --checkpoint checkpoints/epoch_010.pt --source historical --eval-start 2026-04-01 --eval-end 2026-04-16 --out reports/historical.json
 
-The live/historical choice is --source and evaluation must be independent of
-training. The promoted value is OPERATING_THRESHOLD = 0.004946 in
-ml/models/bilstm/threshold.py, chosen for F1 on the corrected full held-out run.
-It produced F1 0.424, versus 0.224 for speed jump. Per-pattern F1: freeze/replay
-0.244, gradual drift 0.793, impossible kinematics 0.161, teleport jump 0.312.
-The control false-positive rate remains material, so this is not an autonomous
-spoofing verdict.
+The live/historical choice is --source. OPERATING_THRESHOLD = 0.004946 in
+ml/models/bilstm/threshold.py is a placeholder: it was chosen for F1 against
+labels made by a synthetic injector that has been removed (F1 0.424, control flag
+rate 19.4%, both on injected data). Re-derive it from the real-traffic report
+(ImplementationPlans/01_Trust_Pass.md). This is not an autonomous spoofing verdict.
 
 ## Live scoring and the agent
 

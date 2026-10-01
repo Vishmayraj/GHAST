@@ -7,15 +7,15 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | Package | Test files | Tests | Run from |
 |---|---|---|---|
 | `ingestion/tests` | `test_normalize.py` | 8 | `ingestion/` |
-| `ml/features/tests` | `test_extract`, `test_inject`, `test_pipeline_streaming`, `test_summary` | 22 | `ml/` |
+| `ml/features/tests` | `test_extract`, `test_pipeline_streaming`, `test_summary` | 20 | `ml/` |
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
-| `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 33 | `ml/` |
+| `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 36 | `ml/` |
 | `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history` | 43 | `agent/` |
 | `scoring/tests` | `test_live_scorer.py` | 9 | `scoring/` |
-| total | 20 files | 123 | |
+| total | 19 files | 124 | |
 
-The ML total is 63. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
+The ML total is 64. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 57 cases for its 13 functions. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
 
 Each package has a `pytest.ini` with a `pythonpath` line so that bare `pytest` resolves the flat imports (`ml/pytest.ini`: `.`; `agent/pytest.ini`: `. ../ml`; `scoring/pytest.ini`: `. ../ml ../agent`). `ingestion/` has no `pytest.ini`; its tests import `normalizer.normalize` and work when run from `ingestion/`.
 
@@ -59,13 +59,13 @@ Gaps in the path filters, from the lists themselves: a change to `ml/features/**
 
 Ingestion: `normalize_envelope` and `parse_time_utc` (nanosecond truncation, missing fractions, bad format, both metadata casings, unsupported types, missing MMSI).
 
-ML features: implied speed with irregular time steps, mask columns, window sizing and minimum length; every injector's labels and reproducibility; streaming windows flushed at vessel boundaries, `max_vessels`, `max_windows`, `max_rows`, progress callback, against a fake connection; the summary text (determinism, teleport, freeze, replay, kinematics, stale feature column ignored, short tracks).
+ML features: implied speed with irregular time steps, mask columns, window sizing and minimum length; streaming windows flushed at vessel boundaries, `max_vessels`, `max_windows`, `max_rows`, progress callback, against a fake connection; the summary text (determinism, teleport, freeze, replay, kinematics, no dependence on a cached implied-speed column, short tracks), using hand-built altered tracks as fixtures.
 
 ML training: vessel hash split (determinism, roughly 20%), shard writer and shard batch iterator shapes, live window policy (14 day and 15 day gates, rolling window).
 
-BiLSTM: `models/bilstm/tests/test_model.py` runs the small in-memory training loop for 10 epochs on one repeated synthetic window and asserts the loss goes down. This is the only test that trains anything.
+BiLSTM: `models/bilstm/tests/test_model.py` runs the small in-memory training loop for 10 epochs on one repeated hand-built window and asserts the loss goes down. This is the only test that trains anything.
 
-Evaluation: precision, recall, F1 and confusion counts; the harness on a 25-row fixture from the public dataset; the Laya exporter's core logic on synthetic windows (schema, label balance, quotas, thinning, the observability gate and its opt-out); `score_checkpoint` helpers (batched scoring equals single-window scoring, zero error on the first report, pattern carried through, threshold candidates, sweep, per-pattern breakdown, both extra detectors).
+Evaluation: precision, recall, F1 and confusion counts; the harness on a 25-row fixture from the public dataset; the Laya exporter's core logic on hand-built real-shaped windows (queue sampling, vessel split, label validation, the eight-column row schema, unlabeled rows ignored, no vessel in both splits); `score_checkpoint` helpers (flattening real windows, missing values, batched scoring equals single-window scoring, vectorised rule detectors equal the baseline detectors, flag rate and threshold-for-flag-rate, report consistency).
 
 Agent: `form_hypothesis` tiers, the exact boundary around `OPERATING_THRESHOLD`, single-detector cap, detector corroboration in evidence, freeze tiering and its backward compatibility, jamming priority, `investigate` audit trail and persistence, the Laya tool (stub, prediction passthrough, shared summary text, too little history, exceptions) and the vote rules, report input compaction and error handling, track history and jamming zone queries via fake connections.
 
@@ -77,7 +77,7 @@ By the code, not by trying:
 
 - Nothing in the test suite needs an external service.
 - Everything that is not a test does: ingestion needs an AISStream key and a database; training, evaluation, export and the scorer need a populated database; the scorer needs `ml/checkpoints/epoch_010.pt`; the Laya path needs the weights file. None of those files is in the repository.
-- The importer, `score_checkpoint.run/main`, `train.run_training/main`, `laya_export._export`, `live_scorer._serve` and `PostgresStore` are the largest pieces of real logic that no test executes.
+- The importer, `score_checkpoint.run/main`, `train.run_training/main`, `laya_export._queue`, `live_scorer._serve` and `PostgresStore` are the largest pieces of real logic that no test executes.
 
 ## Gaps that matter
 
@@ -93,5 +93,5 @@ By the code, not by trying:
 ## Stale comments and docs
 
 - `agent/tests/test_state_machine.py` and `test_pattern_classifier.py` carry `skipif(OPERATING_THRESHOLD is None)` guards and comments saying the threshold is still `None`. It is 0.004946, so the guards never skip and the comments are out of date. `scoring/tests/test_live_scorer.py` has the same guard as a module-level `pytestmark`.
-- `ml/evaluation/README.md` says "13 tests"; there are 33 in that directory.
+- `ml/evaluation/README.md` says "13 tests"; there are 36 in that directory.
 - `ml/evaluation/README.md` describes two baseline detectors and one dataset loader; there are three detectors and a second loader.

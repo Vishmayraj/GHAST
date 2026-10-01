@@ -2,7 +2,7 @@
 
 Laya is an optional fourth evidence source in the investigation agent. Given a text summary of a flagged 20-report window it picks one of five pattern labels and reports a confidence. The agent can use that vote to lift or apply a confidence cap. It cannot choose a hypothesis. This document covers the classifier end to end: data, export, fine-tuning, the artifacts that exist, how it plugs into the agent, and what is unfinished.
 
-Related: `docs/agent.md` (the state machine that consumes it), `docs/ml-pipeline.md` (injectors and the BiLSTM split it inherits).
+Related: `docs/agent.md` (the state machine that consumes it), `docs/ml-pipeline.md` (the BiLSTM vessel split it inherits).
 
 ## Three different things
 
@@ -10,16 +10,16 @@ The words "Laya data", "Laya model" and "the dataset" have been used interchange
 
 | | What it is | Where it lives | In git |
 |---|---|---|---|
-| Source data | AIS position reports in PostgreSQL. The export reads historical rows for 2026-04-01 to 2026-04-15. | `vessel_position` table | no |
-| Derived experiment data | A class-balanced snapshot of injected window summaries: `train.jsonl` (7,500 rows), `holdout.jsonl` (1,500 rows), `manifest.json` | `data/laya/` | yes |
+| Source data | Real AIS position reports in PostgreSQL. The export samples real windows from live or historical rows. | `vessel_position` table | no |
+| Derived experiment data | A review queue of real window summaries, and once a person has labeled it, `train.jsonl`, `holdout.jsonl`, `manifest.json`. None exist yet. | `data/laya/` | no |
 | Model artifacts | The fine-tuned Laya checkpoint: `model.safetensors`, `encoder/`, `tokenizer/`, `rl_agent_config.json`, plus a `benchmark_report.json` from the Kaggle run | `ml/laya_model/` | partly, see below |
 
-`data/laya/*.jsonl` is not "the GHAST dataset". It is 9,000 rows derived from the source data by injecting synthetic spoofs, then summarizing. Neither the rows nor the model contain any real labeled spoofing event, because none exist in the source data.
+`data/laya/*.jsonl` will not be "the GHAST dataset". It will be real window summaries with human labels. **The model currently in use was fine-tuned on a different set: 9,000 rows made by injecting synthetic spoofs into real windows.** That injector and snapshot have been removed from the repo (recoverable from commit `c835f59`). So the current model has never seen a real labeled spoofing event, and nothing in the repo can currently reproduce or replace its training data until real labels exist.
 
 Contents of `ml/laya_model/` in this checkout:
 
 ```text
-benchmark_report.json        evaluation on data/laya/holdout.jsonl
+benchmark_report.json        evaluation on the removed injected holdout
 rl_agent_config.json         training and calibration metadata
 encoder/config.json          ModernBERT-large architecture config (no weights)
 tokenizer/tokenizer.json, tokenizer_config.json
@@ -44,11 +44,11 @@ max_course_vs_travel_direction_deg: 25
 implied_minus_reported_speed_trend_knots: +0.3
 ```
 
-(That example is the first row of `train.jsonl`, a `freeze_replay` case.) Implied speed is recomputed from positions and timestamps, not read from the feature column, because the injectors leave that column stale.
+(That example is a `freeze_replay` case from the removed injected snapshot, kept to show the format.) Implied speed is recomputed from positions and timestamps, not read from a cached feature column, because `track_history` rows have no such column.
 
 The summary does not include the BiLSTM prediction error, which detectors voted, vessel class, position, time of day, or anything about the area. Laya sees only the 20-report track shape.
 
-Five labels (`PATTERN_LABELS`): `normal_track`, `teleport_jump`, `gradual_drift`, `freeze_replay`, `impossible_kinematics`. The first is the injector's "no injection" control renamed, because Laya renders choice keys verbatim. The same question set (`pattern_questions()`, one `choice` question with a criterion sentence per label) is used for training rows and at inference.
+Five labels (`PATTERN_LABELS`): `normal_track`, `teleport_jump`, `gradual_drift`, `freeze_replay`, `impossible_kinematics`. The first means "nothing wrong" and is named for what it means, because Laya renders choice keys verbatim. The same question set (`pattern_questions()`, one `choice` question with a criterion sentence per label) is used for training rows and at inference.
 
 In the live tool (`agent/tools/pattern_classifier.py`) the window is the 20 reports from `track_history` whose `received_at` is at or before the flagged report, newest 20. `track_history` returns all sources for the MMSI in a 48 hour span, so a window can in principle mix live and historical rows. Fewer than 20 reports means the tool returns `available: False`. The result carries the label, the confidence (`answer_confidence`, or the label's probability if that is missing) and the probability of every label.
 
@@ -56,52 +56,42 @@ The 20 reports the tool uses are not necessarily the window the BiLSTM scored: t
 
 ## Export
 
-`ml/evaluation/laya_export.py`. Needs the database, not torch or a checkpoint.
+`ml/evaluation/laya_export.py`. Needs the database for `queue`, nothing for `build`. Neither needs torch or a checkpoint. No windows are altered: every summary describes a track that was really received.
+
+Real windows have no labels, so the data is made in three steps with a person in the middle.
 
 ```text
 cd ml
-python -m evaluation.laya_export --dsn $POSTGRES_DSN --source historical \
-    --start 2026-04-01 --end 2026-04-15 --out-dir ../data/laya
+# 1. sample real windows into a review queue (no answers in it)
+python -m evaluation.laya_export queue --dsn $POSTGRES_DSN --source live \
+    --start 2026-09-01 --end 2026-09-30 --out ../data/laya/review_queue.jsonl
+
+# 2. a reviewer writes labels.jsonl: {"id": "<queue id>", "label": "<one of the five labels>"} per line
+
+# 3. join queue and labels into the files Laya's notebook reads
+python -m evaluation.laya_export build --queue ../data/laya/review_queue.jsonl \
+    --labels ../data/laya/labels.jsonl --out-dir ../data/laya
 ```
 
-Flags: `--per-class-train` (1500), `--per-class-holdout` (300), `--sample-permille` (50), `--max-windows`, `--seed` (0), `--keep-unobservable`.
+`queue` flags: `--source`, `--start`, `--end`, `--out`, `--sample-permille` (5), `--max-rows` (2000), `--max-windows`, `--seed`. It streams windows with `stream_feature_windows`, keeps a hash-thinned sample (by MMSI and window start, so streaming order does not bias which vessels appear), and writes one row per window: `id` (`<mmsi>-<window start>`), `split`, `mmsi`, `source`, `window_start`, `window_end`, `state` (the `features.summary` text, the same text the live tool sends) and `questions`.
 
-Mechanics:
+The split is by vessel using `is_validation_vessel`, the BiLSTM's holdout rule. `build` refuses to write if any vessel is in both splits.
 
-1. Streams clean 20-report windows with `stream_feature_windows`, 2,000 at a time.
-2. `keep_window` keeps about 5% (permille 50) by hashing MMSI and window start.
-3. `assign_case` hashes the window to one of the five labels, a severity from (0.25, 0.5, 0.75), and an injector seed. Labels come out nearly even, which avoids the injector's 25% control skew.
-4. The split is by vessel using `is_validation_vessel`, the BiLSTM's holdout rule, so holdout vessels were not seen by the BiLSTM in training and no vessel is on both sides.
-5. The label is injected (or the window left clean for `normal_track`), the result summarized, and a row written once the per-split, per-class quota is filled. It stops when every quota is met.
+`build` validates the labels (each must be one of `PATTERN_LABELS`, no conflicting duplicates), ignores unlabeled queue rows, writes `train.jsonl` and `holdout.jsonl` in the eight-column schema Laya's notebook loads (`id`, `split`, `mmsi`, `pattern`, `severity`, `state`, `questions`, `gold`; `severity` is always null now, and `gold` has probability 1.0 on the human label), and writes `manifest.json` with counts per split and class, how many queue rows were unlabeled, label ids not found in the queue, and which split-and-class pairs are under 50 labels.
 
-Row schema, matching Laya's own notebook: `id`, `split`, `mmsi`, `pattern`, `severity`, and `state`, `questions`, `gold`, each a JSON-encoded string. `gold` has probability 1.0 on the true label.
-
-`manifest.json` records source, dates, seed, sampling, counts per split and class, and `quota_met`.
-
-### The committed snapshot predates the observability gate
-
-`data/laya/manifest.json` has no `observability_gate` key, and the gate commit (`b6a626f`) came after the snapshot commit (`c835f59`) and after the model results commit (`d503a39`). Code that runs with the gate on always writes that key, and with `--keep-unobservable` writes it as `null`. So the committed `train.jsonl`, `holdout.jsonl` and the model trained on them come from the ungated exporter.
-
-The gate exists because two injectors do nothing visible on a vessel that is not moving. `freeze_replay` copies earlier positions forward, which on a stationary vessel is the same jitter that was already there. `impossible_kinematics` rotates one COG value, which is noise at rest. Rows labeled as those two patterns on stationary windows have summaries that look normal, so the label cannot be learned from the input and teaches the model to guess. The gate skips such rows and counts them in `manifest.json` under `observability_gate.skipped_unobservable`: a freeze replay must move some report at least 50 m, and an impossible-kinematics injection must land on a report with position-implied speed above 1 knot.
-
-Consequences, all from the code and the recorded benchmark:
-
-- The recorded benchmark below is from the ungated data. Its accuracy is not comparable to a gated run, because the unwinnable rows are gone from a gated set.
-- A gated re-export needs more windows read to fill the quota, so expect to raise `--sample-permille` or widen the dates. The unit tests for the gate use synthetic windows (`test_laya_export.py`). It has not been run against the database.
-- With the gate on, the model learns that a stationary-looking window is `normal_track`. It will therefore not flag a freeze or a course flip on a moored vessel. The summary cannot show one.
-- Even ungated, the holdout confusion in the benchmark is concentrated on exactly the three classes whose evidence disappears at rest (below), which is consistent with the gate's rationale. No stationary versus underway breakdown of the holdout has been computed, so the reason is inferred.
+A random sample of real windows is almost all `normal_track`, so a random queue is a wasteful thing to label. Sampling flagged windows (from the `incidents` table and from detector votes) is part of `ImplementationPlans/04_Laya_Real_Labels.md`. Until then, `queue` is the plain version.
 
 ## Fine-tuning
 
 The base model is `convaiinnovations/laya` (ModernBERT-large encoder, about 421M parameters per Laya's notebook text). Fine-tuning has to run on a GPU host; the recorded run used Kaggle.
 
-What is committed as `notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb` is Laya's upstream notebook, unchanged: it still loads `LocalLLaMA/typed-decisions` for training and for its test split. It is not the notebook that produced GHAST's model. The run that did was adapted elsewhere to read `train.jsonl` and `holdout.jsonl`; that adapted notebook is not in the repo. `rl_agent_config.json` from the run records 7,313 updates, 1 epoch, 1.96 hours, `world_size: 1`, `bf16`, `fine_tuned_from_checkpoint: true`. The benchmark report calls it a 2xT4 run while `world_size` says 1; this is unexplained in the repo.
+`notebooks/laya_finetune_ghast_kaggle_2xT4.ipynb` is the GHAST-adapted notebook (committed 2026-09-30, replacing an earlier copy of Laya's upstream notebook). It clones `Vishmayraj/GHAST`, reads `data/laya/train.jsonl` and `holdout.jsonl` through an explicit eight-column schema, trains with Laya's RLCD method unchanged, evaluates on the holdout with a GHAST report (per-class accuracy, confusion matrix, false positive rate, accuracy by confidence, stationary versus moving split), and exports `model.safetensors`, `rl_agent_config.json`, `encoder/` and `tokenizer/`. It does not push to Hugging Face. **It cannot run until `data/laya/train.jsonl` and `holdout.jsonl` exist again**, which now means building them from labeled real windows. `rl_agent_config.json` from the earlier run from the run records 7,313 updates, 1 epoch, 1.96 hours, `world_size: 1`, `bf16`, `fine_tuned_from_checkpoint: true`. The benchmark report calls it a 2xT4 run while `world_size` says 1; this is unexplained in the repo.
 
-The steps that were followed (from the previous version of this document, still the only procedure on record): upload the two jsonl files as a Kaggle dataset, replace the two `load_dataset("LocalLLaMA/typed-decisions", ...)` calls with `load_dataset("json", data_files=...)`, keep the row schema, and download the notebook's output directory.
+To run it: build `train.jsonl` and `holdout.jsonl` (above), commit or attach them so the notebook can find `data/laya/`, run the notebook on a Kaggle GPU, and copy the exported directory into `ml/laya_model/`.
 
 ## Recorded evaluation
 
-Source: `ml/laya_model/benchmark_report.json`, produced by that Kaggle run, over all 1,500 rows of `data/laya/holdout.jsonl`. Not reproducible from the repo (no weights, no adapted notebook).
+Source: `ml/laya_model/benchmark_report.json`, produced by the earlier Kaggle run over all 1,500 rows of the removed injected `holdout.jsonl`. **This benchmark describes the model currently in use, and it is a benchmark on injected data.** Not reproducible from the repo (no weights, and the holdout file is gone).
 
 | Metric | Value |
 |---|---|
@@ -128,7 +118,7 @@ Accuracy by minimum confidence, over all classes:
 
 What this does and does not tell you:
 
-- It is accuracy on a balanced, synthetic, same-generator holdout. It says the model recovers the injector's labels from the summary. It does not say anything about real spoofing.
+- It is accuracy on a balanced, injected, same-generator holdout. It says the model recovered the injector's labels from the summary. It does not say anything about real spoofing.
 - The agent uses the tool asymmetrically (see below): what matters is how often a confident non-normal answer is right when the true class is normal, and how often a confident `normal_track` answer is right when the true class is a spoof. Neither is in the report. The 0.7 row above is accuracy over all five classes and mixes both.
 - In production the model sees flagged windows only, a population selected by the detectors. The holdout is 20% `normal_track` by construction. The class balance in live flagged windows is unknown, so the holdout numbers do not transfer as rates.
 
@@ -172,21 +162,22 @@ Requirements, all needed together:
 | Piece | State |
 |---|---|
 | shared summary and question set | implemented, tested |
-| exporter (with the observability gate) | implemented, unit tested on synthetic windows; gate never run against the database |
-| `data/laya/` snapshot | produced without the gate |
-| fine-tuned model | trained once, on the ungated snapshot; weights not in the repo |
-| holdout evaluation | recorded once (`benchmark_report.json`); synthetic same-generator data only |
+| exporter (`queue` and `build`, real windows and human labels) | implemented, unit tested on hand-built windows; `queue` never run against the database |
+| `data/laya/` | empty; no labeled real windows exist |
+| fine-tuned model | trained once, on injected data that is no longer in the repo; weights not in the repo |
+| holdout evaluation | recorded once (`benchmark_report.json`), on injected data only |
+| fine-tune notebook | GHAST-adapted, committed; waits for labeled data |
 | `pattern_classifier` tool, `investigate` and `form_hypothesis` wiring | implemented, tested with fakes |
 | `load_laya_predictor` against the real library | not tested |
 | `PATTERN_MIN_CONFIDENCE` calibration | not done |
-| gated re-export, retrain, re-evaluation | not done |
-| evaluation on real incidents or real spoofing | not possible yet, no labeled data |
+| retrain on real labels, re-evaluate | not done, blocked on labels |
+| evaluation on real incidents or real spoofing | not possible yet, no labels |
 | effect on real incidents | unmeasured; `ghast_latest_report.md` shows no classifier vote in its evidence summary |
 
 Known limitations:
 
-- Synthetic to real gap. The model learns the injector's version of each pattern. The injector's `freeze_replay` loops earlier positions forward; it does not usually hold one position still, while the agent's freeze corroboration and `freeze_replay_detector` look for held positions. Real spoofing may resemble neither.
-- The injection changes positions or COG only. Other real anomalies (timestamp problems, duplicate messages, AIS sentinel values) are not represented, so their summaries are out of distribution for the classifier and the answer is undefined.
+- Injected-to-real gap. The model in use learned an injector's version of each pattern. Real spoofing may not look like any of the five. Until it is retrained on labeled real windows, treat its vote as unvalidated.
 - The summary carries no vessel type or context. A fishing vessel manoeuvring and a spoofed track can look the same to it.
+- Other real anomalies (timestamp problems, duplicate messages, AIS sentinel values) were never in its training data, so their summaries are out of distribution and the answer is undefined.
 - Laya's own README lists negation and label-wording weaknesses, and its calibration slice comes from its training items.
-- The classifier is trained on data produced by the same injectors used to evaluate the BiLSTM, so agreement between the two is not independent evidence about real spoofing.
+- The five labels are the injector's taxonomy. Whether they are the right classes for real events is an open question that real labeling will answer.

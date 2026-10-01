@@ -2,7 +2,7 @@
 
 Two separate things share the word "scoring" in this repo:
 
-- Offline evaluation, `ml/evaluation/score_checkpoint.py`: injects synthetic spoofs into held-out real windows, scores them with a checkpoint, sweeps thresholds, and reports precision, recall and F1. This is where `OPERATING_THRESHOLD` came from.
+- Offline evaluation, `ml/evaluation/score_checkpoint.py`: scores real, unlabeled windows from the database with a checkpoint and reports rates (error percentiles, detector vote rates, flag rates, the threshold that gives a chosen flag rate). It reports no precision, recall or F1, because real data has no labels.
 - Live scoring, `scoring/live_scorer.py`: polls new live reports, scores the latest window per vessel, and hands flagged reports to the agent.
 
 The model and features are in `docs/ml-pipeline.md`. What the agent does with a flag is in `docs/agent.md`.
@@ -14,11 +14,12 @@ The model and features are in `docs/ml-pipeline.md`. What the agent does with a 
 `score_checkpoint.run()`:
 
 1. Loads a checkpoint (`load_checkpoint`: rebuilds `BiLSTMNextDelta(8)`, loads `model_state`). Device is `--device` or CUDA if available, else CPU. Prints `epoch`, `train_loss`, `val_loss` and, if present, the training `source`, `start`, `end`.
-2. Streams windows from `stream_feature_windows(dsn, eval_start, eval_end, source=...)`.
-3. Keeps only windows from validation vessels: `training.dataset_cache.is_validation_vessel(mmsi)`, the same hash split training used (about 20% of vessels). Everything else is skipped.
-4. Collects held-out windows into batches of `--batch-size` (default 1024). For each batch: `build_synthetic_dataset(batch, seed=seed + batches_scored)`, then `score_injected_windows`, which runs `prediction_errors_batch` once and flattens every report of every window into an `AISObservation`.
-5. After the stream ends, sweeps thresholds for three detectors, picks the best-F1 point for each, prints a per-pattern breakdown, prints a verdict against the speed-jump baseline, and logs to MLflow unless `--no-mlflow`.
-6. Prints a reminder to copy the chosen threshold into `ml/models/bilstm/threshold.py`. It does not write the file.
+2. Streams real windows from `stream_feature_windows(dsn, eval_start, eval_end, source=...)`.
+3. By default keeps only windows from validation vessels: `training.dataset_cache.is_validation_vessel(mmsi)`, the same hash split training used (about 20% of vessels). `--include-training-vessels` keeps everything.
+4. Scores batches of `--batch-size` windows (default 1024) with `prediction_errors_batch` and keeps flat numpy arrays of the per-report error, reported speed, position-implied speed and speed change for reports 1 to 19 of each window. There are no per-report Python objects, so memory is a few arrays, not gigabytes of dataclasses.
+5. Builds a report (`build_report`) and prints it. `--out` also writes it as JSON; MLflow logging is on unless `--no-mlflow`.
+
+Nothing is injected or altered. The model sees exactly the windows the database holds.
 
 ### Command
 
@@ -27,94 +28,68 @@ cd ml
 python -m evaluation.score_checkpoint \
     --dsn postgresql://ghast:ghast@localhost:5432/ghast \
     --checkpoint checkpoints/epoch_010.pt \
-    --source historical \
-    --eval-start 2026-04-01 --eval-end 2026-04-16 \
-    --seed 0 --no-mlflow
+    --source historical --eval-start 2026-04-01 --eval-end 2026-04-16 \
+    --out reports/historical_epoch_010.json --no-mlflow
+
+python -m evaluation.score_checkpoint ... --source live --eval-start 2026-09-01 --eval-end 2026-09-30 \
+    --out reports/live_epoch_010.json --no-mlflow
 ```
 
-Flags: `--source {live,historical}` (default `live`), `--eval-start`, `--eval-end` (ISO date or datetime, both required), `--seed` (default 0), `--batch-size` (default 1024), `--device {cpu,cuda}`, `--no-mlflow`.
+Flags: `--source {live,historical}` (default `live`), `--eval-start`, `--eval-end` (ISO date or datetime, both required), `--batch-size`, `--device {cpu,cuda}`, `--include-training-vessels`, `--max-windows` (development cap), `--freeze-replay-threshold` (0.5, same as the live scorer), `--speed-jump-threshold` (off unless given, same as the live scorer), `--out`, `--no-mlflow`.
+
+Run it once per source and compare the two JSON reports. That comparison is the first real look at the drift problem: the threshold came from historical data and the live feed has different reporting intervals and populated columns.
 
 Requirements that are not in `--help`:
 
-- Working directory must be `ml/` (flat imports). The checkpoint path is relative to wherever you run it, so `checkpoints/epoch_010.pt` means `ml/checkpoints/epoch_010.pt`.
-- `torch`, `numpy`, `asyncpg` and `psutil` are needed (`psutil` is imported inside `run()`). `mlflow` is imported only when logging is on.
-- The MLflow store defaults to `sqlite:///mlruns/mlflow.db` relative to the working directory. The code creates `mlruns/` only when the default URI is in use.
-- The example command in `docs/DEVELOPER_GUIDE.md` and the module docstring use `--eval-start 2026-05-01 --eval-end 2026-05-16`. The importer only loads `ais-2026-04-*.csv`, so a historical run over May reads no rows and exits with "no clean windows found" (exit code 1). Use an April range, or a live range if live data exists.
+- Working directory must be `ml/` (flat imports). The checkpoint path is relative to wherever you run it.
+- `torch`, `numpy`, `asyncpg` and `psutil` are needed. `mlflow` is imported only when logging is on. The MLflow store defaults to `sqlite:///mlruns/mlflow.db`, experiment `bilstm-real-data-scoring`.
+- Historical rows exist only for April 2026 (the importer loads `ais-2026-04-*.csv`). A historical run over another month reads no rows and exits with "no windows found" (exit code 1).
 
-### Which data it evaluates on
+### What the report contains
 
-Evaluation windows come from the same date range the checkpoint trained on. The independence between training and evaluation is only at the vessel level: evaluation uses the validation vessels (hash buckets 800 to 999) that `train_from_shards` used for `val_loss` and never trained on. There is no disjoint time range, because the historical import covers one two-week span. The recorded holdout method string is `validation_vessel_split (fraction=0.2)`.
-
-What follows from that:
-
-- The same vessels' traffic patterns, weather and season are on both sides of the split. Vessel-level separation stops memorization of specific tracks but not a shared distribution.
-- The threshold was chosen as the best-F1 point on this same evaluation set, and the F1 reported for it is measured on that set. There is no second set that the threshold was not tuned on.
-- Evaluation has only run on historical data (per the repo docs). No live-data evaluation is recorded.
-
-### What counts as a prediction and a label
-
-Both are per report, not per window.
-
-- Label: `is_spoofed` for a report, from the injector (see the table in `docs/ml-pipeline.md`). A window with no injection (25% of windows) has no positives.
-- Prediction: `detector(observation) > threshold`, strict inequality.
-- Detectors (`ml/evaluation/baselines.py`), each `AISObservation -> float`:
-
-| Detector | Score | Uses |
-|---|---|---|
-| `prediction_error_detector` | the BiLSTM error for this report (degrees) | `prediction_error` |
-| `speed_jump_detector` | absolute change in reported SOG since the previous report | `acceleration` (derived in the scorer) |
-| `freeze_replay_detector` | `max(0, sog - implied_speed)` when `0 <= implied_speed <= 0.5` knots, else 0 | `sog`, `implied_speed` (the feature column) |
-
-Metrics (`metrics.py`): confusion matrix over all reports, precision, recall, F1, accuracy. Ratios with a zero denominator are 0.0.
-
-Threshold candidates (`threshold_candidates`): 25 values, the 1st to 99.5th percentiles (evenly spaced) of the positive scores of that detector over all observations. `best_by_f1` picks the max-F1 candidate.
-
-Per-pattern breakdown (`per_pattern_breakdown`): observations are grouped by the injected pattern (or `control`), and each group is scored at the chosen threshold. Each pattern group contains all the reports of the windows that received that pattern, including the reports that were not altered. So a pattern's precision is affected by false positives on the clean reports next to the spoofed ones, and the `control` group has no positives, so its precision, recall and F1 print as 0 and only its false positive count is informative.
-
-### Recorded results
-
-These numbers are quoted from `ml/models/bilstm/threshold.py`, `docs/DEVELOPER_GUIDE.md` and `ImplementationPlans/`. The run that produced them was executed on another machine. No MLflow database, run ID, or result file is in the repository, so none of them can be reproduced or checked from this checkout. `threshold.py` says as much and notes that precision and recall at the chosen threshold were not recorded.
-
-| Item | Value |
+| Field | Meaning |
 |---|---|
-| checkpoint | `epoch_010.pt`, epoch 10, train loss 0.0006055, val loss 0.0007673 |
-| scale | about 6.4 million scored observations, validation vessels only |
-| chosen threshold | 0.004946 (max F1), promoted to `OPERATING_THRESHOLD` |
-| prediction error F1 | 0.424 |
-| speed jump baseline F1 | 0.224 |
-| per-pattern F1 for prediction error | freeze_replay 0.244, gradual_drift 0.793, impossible_kinematics 0.161, teleport_jump 0.312 |
-| control false positive rate | 19.4% (a figure carried through the plans and code comments) |
-| earlier, superseded run | F1 0.396 vs 0.214, threshold 0.005451, 1,000 windows, overlapping data |
+| `error_percentiles` | p50, p90, p95, p99, p99.9 of the per-report prediction error, in degrees |
+| `detector_vote_rates` | share of reports each detector flags: `prediction_error` at `OPERATING_THRESHOLD`, `freeze_replay` at its threshold, `speed_jump` only if a threshold is given |
+| `any_detector_flag_rate`, `two_or_more_detectors_flag_rate` | share of reports with at least one vote, and with at least two (what the container's `--min-votes 2` requires) |
+| `flag_rate_at_operating_threshold` | share of reports with prediction error above `OPERATING_THRESHOLD` |
+| `by_motion` | that flag rate split into underway windows (any report implying more than 1 knot) and stationary windows |
+| `threshold_for_flag_rate` | the prediction-error threshold that flags 5%, 1%, 0.5% and 0.1% of these reports |
 
-The per-pattern and control numbers say the detector is much better at gradual drift than at anything else, and that about one in five clean reports is flagged at this threshold. `docs/DEVELOPER_GUIDE.md` already states that this is not an autonomous spoofing verdict.
+The rule detectors (`freeze_replay`, `speed_jump`) are computed with vectorised versions of `evaluation.baselines`; `test_score_checkpoint.py` checks they agree with the baseline functions over a grid of inputs.
 
-`freeze_replay_detector` is swept in every run but no recorded result for it is in the repo.
+### How to read it
 
-### Problems in the evaluation itself
+- On real traffic these are rates, not accuracy. If real spoofing is rare, the flag rate is an upper bound on the false positive rate: almost everything flagged is a false positive or at least unreviewed. It is not a detection score and it says nothing about recall.
+- Picking a threshold by flag rate is an alert budget: "how many flags per thousand reports can an analyst review". It is a policy choice the reports make visible, not a measurement of quality.
+- The by-motion split matters because a stationary vessel gives the freeze detector and the model very little to work with, and anchored or moored vessels are a large share of real traffic.
+- Detection quality (precision, recall) becomes measurable only from reviewed incidents. That loop is `ImplementationPlans/01_Trust_Pass.md`.
 
-Found by reading the code. None were fixed.
+### Same-set caveats that still apply
 
-1. The freeze detector cannot see injected freezes. `freeze_replay_detector` reads `implied_speed` from the feature column, and the injectors do not recompute that column (`docs/ml-pipeline.md`). On injected windows it holds the value from the clean track. The detector's evaluated F1 on the injected `freeze_replay` class therefore says little about whether it detects the injected behavior. The comment in `laya_pattern_classifier.md` about a possible mismatch is consistent with this, but the cause is the stale feature column and not only the pattern shape.
-2. Teleport precision is capped by construction. A teleported report produces a large error at that report and at the next one (the step back). Only the first is labeled, so if both are flagged, half the flags on that pattern are counted as false positives.
-3. Feature/position inconsistency (same root as item 1): the model is scored on windows whose motion features describe the clean track and whose positions describe the altered one. In live use these are consistent, and the model can also see the implied speed of the following report through its bidirectional layer (`docs/ml-pipeline.md`). The offline number is a measurement of a somewhat different task from live scoring; how different has not been measured.
-4. Reproducibility: injection seeds are `seed + batch_index`, and the generator is consumed window by window, so results depend on `--batch-size` and on the order windows stream in. `--seed` alone does not fix the output if the batch size changes.
-5. The threshold is tuned on the set it is reported on (above).
-6. `evaluation.harness` has a CLI whose `--dataset` choices include `injected_synthetic`, but the loader for it is `async` and takes different arguments, so `python -m evaluation.harness --dataset injected_synthetic ...` does not work. The module docstring of `score_checkpoint.py` notes this and that the script deliberately bypasses the harness CLI. `--dataset gps_spoofing_mass` works, and its result is the pre-computed `prediction_error` column of that public file.
+- Evaluation windows come from the same date range the checkpoint trained on. The independence between training and evaluation is only at the vessel level (validation buckets 800 to 999, never trained on). There is no disjoint time range for the historical import.
+- The historical and live reports differ in reporting interval and populated columns (`docs/data-pipeline.md`), so a historical-derived threshold is not automatically right for live.
 
-### Why an evaluation can look like it hangs
+### The old synthetic evaluation
 
-`score_checkpoint.py` is a single-process script with long quiet stretches. Nothing here is a deadlock; these are the places it goes silent, roughly in order of when you meet them:
+The previous version injected fake spoofs and reported F1 against them. It is removed (`docs/ml-pipeline.md`, "No synthetic spoofs"). Its numbers are kept here only as history, because they are still quoted in `threshold.py` and the old plans:
 
-1. Before the first row. The query orders by `(mmsi, received_at)` over the whole range, and the index is `(mmsi, received_at DESC)`. The planner probably has to sort the range first. The first `loading:` line is only printed after 50,000 rows. Reasoning only, not confirmed with `EXPLAIN`.
-2. During streaming and scoring it prints a line at the first batch and then only every 10 batches (10,240 held-out windows at the default batch size).
-3. Memory. `observations` keeps every `AISObservation` (a frozen dataclass with about 17 fields plus two strings) in a Python list until the end. Six million of them is likely several gigabytes; on a small machine this turns into swapping. Estimated from the object shape, not measured.
-4. After `scored N observations ...` the script does the threshold work in pure Python with no output: `threshold_candidates` calls each detector over every observation (3 passes), then each of the 3 sweeps evaluates 25 thresholds, and each `evaluate` call builds two lists over every observation, calling the detector again. That is about 5 x 10^8 detector calls at 6.4 million observations, single-threaded. It is likely to take a long time and prints nothing until the first sweep finishes. Not timed here.
-5. Empty ranges are not a hang but look like one: a wrong `--source` or a range with no rows streams nothing and ends with `no clean windows found ...`.
-6. GPU: the model is small and the forward pass is one call per batch. On a machine with CUDA the GPU is mostly idle because the injection, flattening and sweeps are on the CPU. `torch.cuda.utilization` needs `pynvml`; if it is missing the profile line prints `gpu_utilization=unavailable`.
+| Item | Value | What it measured |
+|---|---|---|
+| chosen threshold | 0.004946 (max F1), now `OPERATING_THRESHOLD` | recovery of injected spoofs on validation vessels |
+| prediction error F1 / speed jump baseline F1 | 0.424 / 0.224 | same |
+| per-pattern F1 | freeze_replay 0.244, gradual_drift 0.793, impossible_kinematics 0.161, teleport_jump 0.312 | same |
+| control false positive rate | 19.4% of clean reports flagged | measured on the set the threshold was tuned on |
+
+None of these say anything about real spoofing, none could be reproduced from the repo, and the threshold is a placeholder until it is re-derived from the real-traffic report above.
+
+### The public labeled dataset
+
+`python -m evaluation.harness --dataset gps_spoofing_mass --path ... --detector prediction_error --threshold ...` still works. It scores the pre-computed `prediction_error` column of the public IEEE-derived file against its own labels. That checks the harness, not this model.
 
 ### Tests
 
-`ml/evaluation/tests/test_score_checkpoint.py` (11 tests) uses a small untrained model and fixtures: batched scoring matches single-window scoring, first report has zero error, pattern carried through, threshold candidates, sweep, per-pattern breakdown, both baselines run on scored observations. `test_metrics.py`, `test_harness.py` and `test_datasets.py` use the 25-row public dataset fixture. Not tested: `run()`, `main()`, MLflow logging, the streaming path against a database.
+`ml/evaluation/tests/test_score_checkpoint.py` (13 test functions, 57 cases with the parametrized parity grid) uses a small untrained model and hand-built windows: flattening, missing values, underway flag, batched scoring equals single-window scoring, vectorised detectors equal the baseline detectors, flag rate and threshold-for-flag-rate, report consistency. `test_metrics.py`, `test_harness.py` and `test_datasets.py` use the 25-row public dataset fixture. Not tested: `run()`, `main()`, MLflow logging, the streaming path against a database.
 
 ## Live scoring
 
@@ -150,7 +125,7 @@ The scorer is not multi-threaded across vessels: it issues one query per active 
 
 ### Points that differ from offline evaluation
 
-- Features are computed from the positions that actually arrived, so they are consistent with them (the offline injected windows are not).
+- Features are computed from the positions that actually arrived. Offline scoring reads the same windows from the database, so the two now see the same kind of input.
 - The model runs on exactly 20 reports ending at the newest one. Offline windows come from non-overlapping chunks of a longer range.
 - The freeze detector here sees real `implied_speed`, so its live behavior is not what its offline evaluation measured. As written it votes whenever the reported SOG exceeds the position-implied speed by more than 0.5 knots on a report whose implied speed is 0.5 knots or less. How often that fires on real moored or anchored traffic has not been measured.
 - The threshold was chosen on historical data with different reporting intervals and a different set of populated columns (`docs/ml-pipeline.md`). Live false positive rate is unmeasured.
@@ -165,10 +140,10 @@ The scorer is not multi-threaded across vessels: it issues one query per active 
 | Piece | State |
 |---|---|
 | `score_checkpoint.py` | implemented, ran at scale elsewhere; unit tested at the function level, not end to end |
-| recorded F1 and threshold | reported in docs and code comments; not reproducible from the repo |
-| `freeze_replay_detector` evaluation | experimental; the injected data does not exercise it (problem 1) |
+| threshold `OPERATING_THRESHOLD` | placeholder from the removed synthetic evaluation; re-derive by flag rate from real traffic |
+| `freeze_replay_detector` evaluation | experimental; only its live vote rate is measurable, on real traffic |
 | live-data evaluation | not done |
 | `live_scorer.py` | implemented, tested with fakes; a live run producing a persisted incident is recorded in `ghast_latest_report.md` (see `docs/agent.md`) |
 | threshold calibration for live | not done |
 | per-vessel-class or per-region thresholds | proposed in code comments, not implemented |
-| harness CLI for `injected_synthetic` | currently broken |
+| harness CLI | works for `gps_spoofing_mass`; the broken `injected_synthetic` option was removed with the injector |
