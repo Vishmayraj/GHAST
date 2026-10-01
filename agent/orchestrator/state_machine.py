@@ -77,25 +77,38 @@ class FlaggedAnomaly:
     # incidents.window_end. None for callers that do not track a window.
     window_start: Any = None
     window_end: Any = None
+    # "A": shown on the console, report on request. "B": score at or above threshold B, so a
+    # report is drafted automatically and the incident is listed first. See threshold_agent.
+    tier: str = "A"
+    # The active threshold A the scorer flagged against. form_hypothesis's "slightly above
+    # threshold" and "below threshold" tests are relative to it. None (older callers, tests)
+    # means models.bilstm.threshold.OPERATING_THRESHOLD, as before.
+    threshold_a: float | None = None
 
 @dataclass(frozen=True)
 class InvestigationResult:
     state: InvestigationState; hypothesis: str; confidence: float; evidence: dict[str, Any]; tool_call_log: list[dict[str, Any]]
+    incident_id: str | None = None
+
+def _threshold(anomaly: FlaggedAnomaly) -> float | None:
+    return anomaly.threshold_a if anomaly.threshold_a is not None else OPERATING_THRESHOLD
 
 Tool = Callable[[FlaggedAnomaly], Awaitable[dict[str, Any]]]
-Persist = Callable[[dict[str, Any]], Awaitable[None]]
+Persist = Callable[[dict[str, Any]], Awaitable[str | None]]
 
-async def persist_incident(connection: Any, row: dict[str, Any]) -> None:
-    """Store the complete audit trail in the schema-owned incidents record."""
+async def persist_incident(connection: Any, row: dict[str, Any]) -> str | None:
+    """Store the complete audit trail in the schema-owned incidents record; return the new id."""
     latitude, longitude = row["flagged_position"]
-    await connection.execute(
-        """INSERT INTO incidents (mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text, window_start, window_end)
-           VALUES ($1,$2,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)""",
+    new_id = await connection.fetchval(
+        """INSERT INTO incidents (mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text, window_start, window_end, tier)
+           VALUES ($1,$2,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14,$15)
+           RETURNING id::text""",
         row["mmsi"], row["flagged_at"], latitude, longitude, row["anomaly_score"], row["anomaly_type"],
         row["hypothesis"], row["confidence"], row["status"], json.dumps(row["evidence"], default=str),
         json.dumps(row["tool_call_log"], default=str), row.get("report_text"),
-        row.get("window_start"), row.get("window_end"),
+        row.get("window_start"), row.get("window_end"), row.get("tier", "A"),
     )
+    return str(new_id) if new_id is not None else None
 
 def _pattern_confident_label(evidence: dict[str, Any]) -> str | None:
     """The Laya label, only when the tool ran and is at least PATTERN_MIN_CONFIDENCE sure."""
@@ -149,7 +162,7 @@ def _is_weak_isolated_flag(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) ->
     """
     if anomaly.detector_votes != frozenset({"prediction_error"}):
         return False
-    if anomaly.anomaly_score > OPERATING_THRESHOLD * BENIGN_MAX_SCORE_MULTIPLE:
+    if anomaly.anomaly_score > _threshold(anomaly) * BENIGN_MAX_SCORE_MULTIPLE:
         return False
     label = _pattern_confident_label(evidence)
     if label is not None and label != NORMAL_LABEL:
@@ -159,7 +172,7 @@ def _is_weak_isolated_flag(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) ->
 def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[str, float]:
     """Use transparent Stage 1 rules until reviewed incidents support learned decisions."""
     if evidence["jamming_zones"].get("matched"): return "jamming", 0.85
-    if OPERATING_THRESHOLD is None:
+    if _threshold(anomaly) is None:
         # Should not happen once ml/models/bilstm/threshold.py is finalized (see that
         # module's provenance comment); a guessed fallback constant here would silently
         # misclassify at whatever scale a future retrained model happens to score at.
@@ -173,7 +186,7 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
     # prediction_error alone was found to miss. Empty detector_votes (untracked/legacy
     # callers) and prediction_error-only votes keep the original behavior.
     other_detector_votes = anomaly.detector_votes - {"prediction_error"}
-    if anomaly.anomaly_score < OPERATING_THRESHOLD and not other_detector_votes: return "benign", BENIGN_CONFIDENCE
+    if anomaly.anomaly_score < _threshold(anomaly) and not other_detector_votes: return "benign", BENIGN_CONFIDENCE
     # investigate() populates evidence["freeze_corroboration"] (see
     # tools.freeze_corroboration.corroborate_freeze_replay) from track_history's raw
     # position sequence - an independent signal from the model's own anomaly_score.
@@ -223,6 +236,6 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
     evidence["detector_corroboration"] = {"votes": sorted(anomaly.detector_votes), "count": len(anomaly.detector_votes)}
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     state = InvestigationState.REPORTING if confidence >= REPORT_CONFIDENCE_THRESHOLD else InvestigationState.ESCALATING
-    row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude), "window_start": anomaly.window_start, "window_end": anomaly.window_end}
-    await persist(row)
-    return InvestigationResult(InvestigationState.DONE, hypothesis, confidence, evidence, log)
+    row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude), "window_start": anomaly.window_start, "window_end": anomaly.window_end, "tier": anomaly.tier}
+    incident_id = await persist(row)
+    return InvestigationResult(InvestigationState.DONE, hypothesis, confidence, evidence, log, incident_id)

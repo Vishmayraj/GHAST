@@ -276,8 +276,9 @@ async def test_investigate_carries_the_scored_window_into_the_row() -> None:
 class _FakeInsertConnection:
     def __init__(self) -> None:
         self.calls = []
-    async def execute(self, query, *args):
+    async def fetchval(self, query, *args):
         self.calls.append((query, args))
+        return "00000000-0000-0000-0000-000000000001"
 
 @pytest.mark.asyncio
 async def test_persist_incident_writes_window_columns() -> None:
@@ -286,10 +287,10 @@ async def test_persist_incident_writes_window_columns() -> None:
            "hypothesis": "jamming", "confidence": 0.85, "status": "reported", "evidence": {}, "tool_call_log": [],
            "window_start": start, "window_end": end}
     connection = _FakeInsertConnection()
-    await persist_incident(connection, row)
+    assert await persist_incident(connection, row) == "00000000-0000-0000-0000-000000000001"
     query, args = connection.calls[0]
-    assert "window_start, window_end" in query and "$13,$14" in query
-    assert args[-2:] == (start, end)
+    assert "window_start, window_end, tier" in query and "$13,$14,$15" in query
+    assert args[-3:] == (start, end, "A")
 
 
 def test_the_report_draft_threshold_sits_above_the_reported_line() -> None:
@@ -306,3 +307,35 @@ async def test_a_reported_incident_is_never_given_report_text_during_investigati
              "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
     await investigate(anomaly, tools, persist)
     assert saved[0]["status"] == "reported" and "report_text" not in saved[0]
+
+
+@pytest.mark.asyncio
+async def test_persist_incident_writes_the_tier() -> None:
+    now = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    row = {"mmsi": 1, "flagged_at": now, "flagged_position": (10.0, 20.0), "anomaly_score": 0.9, "anomaly_type": "position",
+           "hypothesis": "jamming", "confidence": 0.85, "status": "reported", "evidence": {}, "tool_call_log": [], "tier": "B"}
+    connection = _FakeInsertConnection()
+    await persist_incident(connection, row)
+    assert connection.calls[0][1][-1] == "B"
+
+
+@pytest.mark.asyncio
+async def test_investigate_returns_the_stored_incident_id_and_carries_the_tier() -> None:
+    saved = []
+    async def persist(row):
+        saved.append(row)
+        return "abc"
+    anomaly = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.9, "position", 10, 20, tier="B")
+    tools = {"track_history": await _tool({"positions": []}), "jamming_zones": await _tool({"matched": True}),
+             "incident_history": await _tool({"same_vessel": [], "same_pattern_elsewhere": []})}
+    result = await investigate(anomaly, tools, persist)
+    assert result.incident_id == "abc" and saved[0]["tier"] == "B"
+
+
+def test_benign_tests_are_relative_to_the_active_threshold_a_not_the_legacy_constant() -> None:
+    quiet = {"jamming_zones": {}, "incident_history": {"same_vessel": [], "same_pattern_elsewhere": []}}
+    below = FlaggedAnomaly(1, datetime.now(timezone.utc), 0.5, "prediction_error", 10, 20, threshold_a=2.0)
+    above = FlaggedAnomaly(1, datetime.now(timezone.utc), 2.5, "prediction_error", 10, 20, threshold_a=2.0,
+                           detector_votes=frozenset({"prediction_error", "freeze_replay"}))
+    assert form_hypothesis(below, quiet)[0] == "benign"
+    assert form_hypothesis(above, quiet)[0] != "benign"
