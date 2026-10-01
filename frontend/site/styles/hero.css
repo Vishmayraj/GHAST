@@ -1,15 +1,15 @@
 /* Scroll-scrubbed hero. scroll-hero.js writes --reveal per line and --scrim. */
-.hero { position: relative; height: 460vh; background: var(--ink); }
+.hero { position: relative; height: 300vh; background: #0a1a2b; }
 .hero__sticky { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow: hidden; display: flex; align-items: flex-end; }
-.hero__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: var(--ink); }
-.hero__scrim { position: absolute; inset: 0; background: rgba(10, 32, 54, 0.55); opacity: var(--scrim, 0); pointer-events: none; }
+.hero__video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #0a1a2b; }
+.hero__scrim { position: absolute; inset: 0; background: rgba(10, 26, 43, 0.55); opacity: var(--scrim, 0); pointer-events: none; }
 .hero__content { position: relative; z-index: 1; width: 100%; max-width: var(--col-max); margin: 0 auto; padding: 0 var(--gutter) 5rem; color: var(--paper); }
 .hero__line { --reveal: 0; opacity: var(--reveal); transform: translateY(calc((1 - var(--reveal)) * 22px)); }
 .hero__title { font-size: var(--fs-h1); line-height: 0.95; letter-spacing: 0.01em; }
 .hero__name { margin-top: 1rem; font-size: var(--fs-small); letter-spacing: 0.04em; }
 .hero__tagline { margin-top: 1.25rem; font-size: 1.25rem; max-width: 40ch; color: rgba(245, 242, 235, 0.82); }
 .hero__end { height: 1px; }
-@media (max-width: 720px) { .hero { height: 380vh; } }
+@media (max-width: 720px) { .hero { height: 260vh; } }
 @media (prefers-reduced-motion: reduce) {
   .hero { height: auto; }
   .hero__sticky { position: relative; height: 84vh; min-height: 480px; }
