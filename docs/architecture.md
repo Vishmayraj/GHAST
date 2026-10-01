@@ -155,7 +155,7 @@ Agent behavior:
 7. (Fixed in the trust pass, kept for history.) `incident_history` matched `anomaly_type` across all vessels, so `targeted_spoof` was reachable only for the first incident of each type string. It now returns `same_vessel` and `same_pattern_elsewhere` separately and only `same_vessel` decides.
 8. The original `benign` branch (score below threshold, no other vote) is still unreachable from the live scorer. A second rule makes `benign` reachable: a lone, barely-over-threshold `prediction_error` flag on a stationary window with no corroboration. Its constants are uncalibrated and the rule is pending owner sign-off.
 9. (Fixed in the trust pass, kept for history.) `track_history` used to read 24 hours forward as well as back and freeze corroboration ran over all of it, so one frozen pair in 48 hours matched. It now stops at the flag, corroboration uses the last 20 reports, and it needs at least 3 frozen pairs (uncalibrated).
-10. `status = 'resolved'` is now set only by an analyst verdict (`agent/review.py`). Until an incident is reviewed, any recent non-resolved incident still debounces new ones for that vessel, and no incident has been reviewed yet.
+10. `status = 'resolved'` is now set only by an analyst verdict (`agent/review.py`). Until an incident is reviewed, any recent non-resolved incident still debounces new ones for that vessel, and no incident has been reviewed yet. The scorer's in-memory cooldown is intentionally left alone by a verdict (see `docs/agent.md`, "Analyst review").
 11. (Fixed in the trust pass, kept for history.) Laya used to "agree" with any non-normal label. It now agrees only when the label is the one the hypothesis implies.
 
 Operations:
