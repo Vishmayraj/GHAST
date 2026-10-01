@@ -3,135 +3,53 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GHAST — GNSS &amp; AIS Hazardous Spoofing Tracker</title>
-  <meta name="description" content="GHAST flags GNSS/AIS spoofing and jamming from vessel trajectory behavior, then turns it into an auditable, evidence-backed incident report." />
-
+  <title>GHAST</title>
+  <meta name="description" content="GHAST watches vessel position reports, flags the ones that do not add up, and shows an analyst why." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles/tokens.css" />
   <link rel="stylesheet" href="styles/base.css" />
   <link rel="stylesheet" href="styles/nav.css" />
   <link rel="stylesheet" href="styles/hero.css" />
-  <link rel="stylesheet" href="styles/sections.css" />
-
+  <link rel="stylesheet" href="styles/pages.css" />
   <script>document.documentElement.classList.remove("no-js");</script>
 </head>
 <body>
-
-  <nav class="site-nav" aria-label="Primary">
-    <div class="site-nav__inner">
-      <a class="site-nav__brand" href="index.html">
-        <span class="site-nav__brand-mark" aria-hidden="true"></span>
-        GHAST
-      </a>
-      <ul class="site-nav__links">
-        <li><a href="index.html" aria-current="page">Home</a></li>
-        <li><a href="approach.html">Approach</a></li>
-        <li><a href="platform.html">Platform</a></li>
-        <li><a href="about.html">About</a></li>
-      </ul>
-      <a class="site-nav__cta" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">View on GitHub</a>
+<header class="header"><div class="header__in"><a class="mark" href="index.html" aria-label="GHAST home"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 17H12"/><path d="M19 10v4" stroke-dasharray="1.5 2"/><circle cx="19" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5" fill="currentColor"/></svg><span>GHAST</span></a><button class="header__menu" aria-expanded="false" aria-controls="nav-links">Menu</button><nav class="header__links" id="nav-links" aria-label="Primary" data-open="false"><a href="how-it-works.html">How it works</a><a href="console.html">Console</a><a href="trust.html">Trust</a><a href="project.html">Project</a><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></nav></div></header>
+<section class="hero" data-hero aria-label="GHAST introduction">
+  <div class="hero__sticky">
+    <video class="hero__video" data-hero-video muted playsinline preload="auto" aria-hidden="true">
+      <source src="assets/ghast-hero.webm" type="video/webm" />
+      <source src="assets/ghast-hero.mp4" type="video/mp4" />
+    </video>
+    <div class="hero__scrim" data-hero-scrim></div>
+    <div class="hero__content">
+      <h1 class="hero__line hero__title" data-hero-line="0.1,0.55">GHAST</h1>
+      <p class="hero__line hero__name" data-hero-line="0.25,0.7">GNSS and AIS Hazardous Spoofing Tracker</p>
+      <p class="hero__line hero__tagline" data-hero-line="0.4,0.9">Watches vessel position reports, flags the ones that do not add up, and shows an analyst why.</p>
     </div>
-  </nav>
-
-  <!-- ============ HERO: scroll-controlled cinematic opening ============ -->
-  <section class="hero" data-hero aria-label="GHAST introduction">
-    <div class="hero__sticky">
-      <video
-        class="hero__video"
-        data-hero-video
-        muted
-        playsinline
-        preload="auto"
-        aria-hidden="true"
-      >
-        <source src="assets/ghast-hero.webm" type="video/webm" />
-        <source src="assets/ghast-hero.mp4" type="video/mp4" />
-      </video>
-      <div class="hero__scrim" data-hero-scrim></div>
-      <div class="hero__content">
-        <p class="hero__line hero__eyebrow" data-hero-line="0,0.4">Anomaly flagged</p>
-        <h1 class="hero__line hero__title" data-hero-line="0.15,0.65">GHAST</h1>
-        <p class="hero__line hero__tagline" data-hero-line="0.35,0.85">
-          GNSS &amp; AIS Hazardous Spoofing Tracker — behavior flagged, scored,
-          and turned into an evidence-backed incident report.
-        </p>
-        <p class="hero__line hero__scroll-cue" data-hero-line="0.55,1">keep scrolling</p>
-      </div>
-    </div>
-  </section>
-
-  <div class="hero-wash" aria-hidden="true">
-    <div class="hero-wash__grid"></div>
   </div>
-
-  <main id="main">
-
-    <section class="section">
-      <div class="section__inner">
-        <p class="eyebrow">What just happened</p>
-        <h2 class="section__title">A <span class="accent">wake</span>, not a signature.</h2>
-        <p class="section__lede">
-          GHAST doesn't watch for a known jamming signature or a blocklist of
-          bad actors. It watches how a vessel moves — speed, course, heading,
-          rate of turn — and asks whether the next reported position is
-          physically plausible for that vessel. When the answer is no by a
-          wide enough margin, that's the signal.
-        </p>
-      </div>
-    </section>
-
-    <section class="section" style="padding-top: 0;">
-      <div class="section__inner data-cards">
-        <a class="card data-card data-card--link" href="approach.html">
-          <h3 class="data-card__title">Reading the wake</h3>
-          <p class="data-card__body">
-            How next-state prediction turns a deviation into an anomaly
-            score, and how a fleet-wide check tells targeted spoofing apart
-            from area jamming.
-          </p>
-        </a>
-        <a class="card data-card data-card--link" href="platform.html">
-          <h3 class="data-card__title">From flag to report</h3>
-          <p class="data-card__body">
-            What a flagged anomaly becomes: a bounded investigation agent,
-            an auditable trace, and an incident report an analyst can
-            actually act on.
-          </p>
-        </a>
-        <a class="card data-card data-card--link" href="about.html">
-          <h3 class="data-card__title">What flows with us</h3>
-          <p class="data-card__body">
-            Why behavior-based detection, and what we do differently from
-            zone-alert and signature-matching tools already out there.
-          </p>
-        </a>
-      </div>
-    </section>
-
-  </main>
-
-  <footer class="site-footer">
-    <div class="site-footer__inner">
-      <div>
-        <div class="site-footer__brand">GHAST</div>
-        <div class="site-footer__status">Semester 5, Stage 1, GTU-SET</div>
-        <div class="site-footer__stack" style="margin-top: var(--space-6);">
-          <span class="stack-chip">PyTorch</span>
-          <span class="stack-chip">TimescaleDB</span>
-          <span class="stack-chip">PostGIS</span>
-          <span class="stack-chip">Claude API</span>
-        </div>
-      </div>
-      <div>
-        <a class="site-footer__link" href="https://github.com/Vishmayraj/GHAST" target="_blank" rel="noopener">Source on GitHub</a>
-      </div>
-    </div>
-    <p class="site-footer__meta">Illustrative platform preview. Data on this site is mock, not live.</p>
-  </footer>
-
+</section>
+<div class="hero__end" data-hero-end></div><main>
+<section class="section" data-reveal><div class="wrap split">
+  <h2>A ship reports where it is. GHAST checks whether that is possible.</h2>
+  <div>
+    <p>Every vessel broadcasts its position, speed and course. When that signal is jammed or faked, the numbers stop fitting together: a turn too sharp for the hull, a jump with no time to make it, a position frozen while the speed says the ship is moving.</p>
+    <p>GHAST learns how each vessel normally moves and flags the reports that break from it. Then it gathers the evidence, says what it thinks happened and how sure it is, and leaves the decision to a person.</p>
+  </div>
+</div></section>
+<section class="section" data-reveal><div class="wrap">
+  <ul class="routes">
+    <li><a href="how-it-works.html"><h3>How it works</h3><p>How one odd position becomes a flag, then a hypothesis, then a decision.</p></a></li>
+    <li><a href="console.html"><h3>Console</h3><p>Open a sample incident and work it the way an analyst would.</p></a></li>
+    <li><a href="trust.html"><h3>Trust</h3><p>How often GHAST is right, and how that gets measured.</p></a></li>
+  </ul>
+</div></section>
+</main>
+<footer class="footer"><div class="wrap footer__in"><span>GHAST. GNSS and AIS Hazardous Spoofing Tracker.</span><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></div></footer>
   <script src="scripts/scroll-hero.js"></script>
+  <script src="scripts/ui.js"></script>
+  
 </body>
 </html>
