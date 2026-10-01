@@ -22,7 +22,7 @@ from collector.config import IngestionConfig
 
 logger = logging.getLogger(__name__)
 
-# backend/models/ owns the DB schema per the repo layout (ImplementationPlans/Sem5IP.md
+# backend/models/ owns the DB schema per the repo layout (ImplementationPlans/old/Sem5IP.md
 # section 6); this ingestion service just applies it on startup.
 _SCHEMA_PATH = Path(__file__).resolve().parents[1] / "backend" / "models" / "schema.sql"
 

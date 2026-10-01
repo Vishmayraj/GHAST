@@ -1,6 +1,6 @@
 # ingestion/
 
-Pulls real AIS data continuously from a public source and turns it into clean, normalized records in TimescaleDB. This is Weeks 1-4 of `ImplementationPlans/Sem5IP.md`.
+Pulls real AIS data continuously from a public source and turns it into clean, normalized records in TimescaleDB. This is Weeks 1-4 of `ImplementationPlans/old/Sem5IP.md`.
 
 - `collector/` — the AIS Stream (aisstream.io) websocket client and config.
 - `normalizer/` — turns a raw AIS Stream envelope into GHAST's internal record shapes.

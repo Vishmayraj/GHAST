@@ -12,7 +12,7 @@ from tools.freeze_corroboration import corroborate_freeze_replay
 
 REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate with reviewed incidents in Stage 3.
 
-# Per ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md section 3: a flag where
+# Per ImplementationPlans/old/Sem5_BigPass_LiveScoring_And_Laya.md section 3: a flag where
 # only one detector fired is weaker evidence than one where two or more independently
 # agree - this is a first pass at that distinction (a hard cap below
 # REPORT_CONFIDENCE_THRESHOLD so it escalates instead of auto-reporting), not a claim

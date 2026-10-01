@@ -5,7 +5,7 @@ from models.bilstm.threshold import OPERATING_THRESHOLD
 
 # OPERATING_THRESHOLD stays None until evaluation/score_checkpoint.py has produced a
 # real, held-out-scale threshold (see threshold.py's own provenance comment and
-# ImplementationPlans/Sem5_Evaluation_Followup.md section 9) - that hasn't happened yet,
+# ImplementationPlans/old/Sem5_Evaluation_Followup.md section 9) - that hasn't happened yet,
 # so these threshold-dependent tests are meaningless (and would hard-fail on the
 # `assert ... is not None` alone) until then. Skip, don't fail, in the interim.
 requires_operating_threshold = pytest.mark.skipif(
@@ -85,7 +85,7 @@ def test_jamming_match_takes_priority_over_freeze_corroboration() -> None:
     assert hypothesis == "jamming"
     assert confidence == 0.85
 
-# detector_votes corroboration cap (ImplementationPlans/Sem5_BigPass_LiveScoring_And_Laya.md
+# detector_votes corroboration cap (ImplementationPlans/old/Sem5_BigPass_LiveScoring_And_Laya.md
 # section 3): a flag where only one of the live scorer's detectors fired is weaker
 # evidence than one where two or more independently agree.
 @requires_operating_threshold
