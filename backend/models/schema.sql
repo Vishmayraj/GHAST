@@ -117,6 +117,10 @@ ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS review_notes TEXT;
 
+-- Reports are drafted on request, never during investigation (agent/report_generator/on_demand.py).
+-- report_text stays NULL until an analyst asks for one; report_generated_at records when.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_generated_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS incidents_unreviewed_idx
     ON incidents (flagged_at DESC) WHERE review_verdict IS NULL;
 

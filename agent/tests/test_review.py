@@ -68,6 +68,25 @@ def test_list_output_shows_hypothesis_confidence_votes_span_and_report_pointer()
         assert expected in text
 
 
+def test_list_says_whether_a_report_can_be_drafted() -> None:
+    drafted = format_list([incident_row(has_report=False, confidence=0.85)])
+    assert f"can be drafted (python review.py report {INCIDENT_ID})" in drafted
+    below = format_list([incident_row(has_report=False, confidence=0.72)])
+    assert "none (below the report threshold)" in below
+
+
+def test_show_hints_how_to_get_a_report_only_when_one_can_be_drafted() -> None:
+    eligible = format_show(incident_row(report_text=None, confidence=0.85))
+    assert f"none yet (draft one with: python review.py report {INCIDENT_ID})" in eligible
+    below = format_show(incident_row(report_text=None, confidence=0.72))
+    assert "confidence is below the 0.8 needed" in below
+
+
+def test_report_command_parses() -> None:
+    with pytest.raises(SystemExit):
+        main(["--dsn", "postgresql://x", "report", "not-a-uuid"])
+
+
 def test_list_output_copes_with_old_rows_that_have_no_window_or_report() -> None:
     text = format_list([incident_row(window_start=None, window_end=None, has_report=False, confidence=None)])
     assert "span=n/a to n/a" in text and "report: none" in text and "confidence=n/a" in text

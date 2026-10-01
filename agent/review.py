@@ -4,11 +4,16 @@
     python review.py list [--limit 25]
     python review.py show <incident-id>
     python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAME] [--force]
+    python review.py report <incident-id> [--force]
 
 `list` shows unreviewed incidents, newest first. `show` prints the stored evidence and the
 20-report summary text the Laya classifier reads. `verdict` records the analyst's call and
 sets status = 'resolved', which is what lifts the live scorer's debounce for that vessel
 (scoring/live_scorer.py only skips vessels with an incident that is not resolved).
+
+`report` drafts an LLM report for one incident on request (needs GROQ_API_KEY). Reports are
+never drafted automatically, and only incidents at or above REPORT_DRAFT_CONFIDENCE_THRESHOLD
+are eligible. This command is the stand-in for the dashboard's "generate report" button.
 
 Only incidents that already exist are reviewed. Nothing in this module creates one.
 """
@@ -35,6 +40,7 @@ for _package_dir in ("ml", "agent"):
         sys.path.append(_path)
 
 from features.summary import summarize_rows  # noqa: E402
+from orchestrator.state_machine import REPORT_DRAFT_CONFIDENCE_THRESHOLD  # noqa: E402
 from tools.pattern_classifier import WINDOW_LENGTH, recent_window  # noqa: E402
 
 VERDICTS = ("confirmed_spoof", "jamming", "equipment_fault", "benign", "unclear")
@@ -106,7 +112,12 @@ def format_list(rows: Sequence[dict[str, Any]]) -> str:
     for row in rows:
         confidence = row.get("confidence")
         confidence_text = "n/a" if confidence is None else f"{confidence:.2f}"
-        report = f"stored (python review.py show {row['id']})" if row.get("has_report") else "none"
+        if row.get("has_report"):
+            report = f"stored (python review.py show {row['id']})"
+        elif confidence is not None and confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD:
+            report = f"can be drafted (python review.py report {row['id']})"
+        else:
+            report = "none (below the report threshold)"
         blocks.append(
             f"{row['id']}  flagged {_stamp(row['flagged_at'])}  mmsi={row['mmsi']}\n"
             f"  hypothesis={row['hypothesis']} confidence={confidence_text} status={row['status']}\n"
@@ -146,6 +157,13 @@ def _compact_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _report_hint(row: dict[str, Any]) -> str:
+    confidence = row.get("confidence")
+    if confidence is not None and confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD:
+        return f"none yet (draft one with: python review.py report {row['id']})"
+    return f"none (confidence is below the {REPORT_DRAFT_CONFIDENCE_THRESHOLD} needed to draft a report)"
+
+
 def format_show(row: dict[str, Any]) -> str:
     evidence = _as_json(row.get("evidence")) or {}
     lines = [
@@ -165,7 +183,7 @@ def format_show(row: dict[str, Any]) -> str:
         window_summary(evidence, row["flagged_at"]),
         "",
         "stored report:",
-        row.get("report_text") or "none",
+        row.get("report_text") or _report_hint(row),
     ]
     return "\n".join(lines)
 
@@ -175,6 +193,30 @@ def _valid_id(value: str) -> str:
         return str(uuid.UUID(value))
     except ValueError as error:
         raise argparse.ArgumentTypeError(f"{value!r} is not a full incident id (UUID)") from error
+
+
+async def _report(connection: Any, args: argparse.Namespace) -> int:
+    from dotenv import load_dotenv
+
+    from report_generator.on_demand import generate_report
+
+    load_dotenv(_REPO_ROOT / ".env")
+    if not os.environ.get("GROQ_API_KEY"):
+        print("GROQ_API_KEY is not set; nothing was drafted", file=sys.stderr)
+        return 1
+    from groq import AsyncGroq
+
+    result = await generate_report(connection, args.incident_id, AsyncGroq(max_retries=0), force=args.force)
+    if result.outcome == "not_found":
+        print(f"no incident {args.incident_id}", file=sys.stderr)
+        return 1
+    if result.outcome in ("not_eligible", "failed"):
+        print(f"{result.outcome}: {result.detail}", file=sys.stderr)
+        return 1
+    if result.outcome == "already_drafted":
+        print("(already drafted, showing the stored report; pass --force to draft again)", file=sys.stderr)
+    print(result.report_text)
+    return 0
 
 
 async def _run(args: argparse.Namespace) -> int:
@@ -192,6 +234,8 @@ async def _run(args: argparse.Namespace) -> int:
                 return 1
             print(format_show(row))
             return 0
+        if args.command == "report":
+            return await _report(connection, args)
         outcome = await record_verdict(connection, args.incident_id, args.verdict, args.reviewer, args.notes, args.force)
         if outcome == "not_found":
             print(f"no incident {args.incident_id}", file=sys.stderr)
@@ -219,6 +263,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     verdict_parser.add_argument("--notes")
     verdict_parser.add_argument("--reviewer", default=getpass.getuser(), help="Defaults to the OS user.")
     verdict_parser.add_argument("--force", action="store_true", help="Replace an existing verdict.")
+    report_parser = commands.add_parser("report", help="Draft an LLM report for one incident on request.")
+    report_parser.add_argument("incident_id", type=_valid_id)
+    report_parser.add_argument("--force", action="store_true", help="Draft again even if a report is stored.")
     args = parser.parse_args(argv)
     if not args.dsn:
         parser.error("--dsn is required (or set POSTGRES_DSN)")
