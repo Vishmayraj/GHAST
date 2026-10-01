@@ -55,3 +55,6 @@
   .detail__back { display: block; }
   .strip .tag { margin-left: 0; }
 }
+
+.queue__hello { padding: 1rem 1rem 0.25rem 0; font-family: var(--font-serif); font-size: 1.5rem; line-height: 1.2; letter-spacing: -0.01em; }
+.queue__keys { padding: 0 1rem 0.75rem 0; font-size: var(--fs-meta); margin: 0; }

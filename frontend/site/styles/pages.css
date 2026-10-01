@@ -44,3 +44,7 @@
 .split--flip p { margin-left: auto; }
 @media (max-width: 860px) { .split--flip { text-align: left; } .split--flip > * { order: 0 !important; } .split--flip p { margin-left: 0; } }
 .fleet svg circle.dot { transform-box: fill-box; transform-origin: center; }
+
+.play { width: 100%; height: auto; margin-top: 1.5rem; }
+.play__out { margin-top: 0.75rem; min-height: 3.2em; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .play .ping { animation: none; } }

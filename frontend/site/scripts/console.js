@@ -32,6 +32,7 @@
     list.innerHTML = '<p class="queue__msg">Loading incidents.</p>';
     api.incidents({ status: state.status, hypothesis: state.hypothesis, limit: 50 }).then(function (r) {
       state.items = r.items;
+      if (!state.status && !state.hypothesis) hello(r.items);
       if (!r.items.length) { list.innerHTML = '<p class="queue__msg">No incidents match these filters.</p>'; return; }
       list.innerHTML = r.items.map(function (i) {
         return '<button class="row" data-id="' + i.id + '"' + (i.id === state.selected ? ' aria-current="true"' : "") + '><span class="row__dot' + (i.status === "resolved" ? " row__dot--off" : "") + '" aria-label="' + (i.status === "resolved" ? "Reviewed" : "Unreviewed") + '"></span>' +
@@ -39,6 +40,14 @@
           '<span class="row__sub">' + esc(HYP[i.hypothesis]) + ' / ' + ago(i.flagged_at) + '</span></button>';
       }).join("");
     }, function () { list.innerHTML = '<p class="queue__msg">The service did not answer. <button class="link" data-retry style="background:none;border:0;padding:0;cursor:pointer">Try again</button></p>'; });
+  }
+
+  /* a greeting that says how much is waiting */
+  function hello(items) {
+    var el = document.querySelector("[data-hello]"); if (!el) return;
+    var h = new Date().getHours(), g = h < 5 ? "Working late." : h < 12 ? "Good morning." : h < 18 ? "Good afternoon." : "Good evening.";
+    var n = items.filter(function (i) { return i.status !== "resolved"; }).length;
+    el.textContent = g + " " + (n === 0 ? "Nothing is waiting for you." : n === 1 ? "One incident is waiting for a verdict." : n + " incidents are waiting for a verdict.");
   }
 
   /* map */
@@ -136,5 +145,17 @@
   document.querySelector('[data-module="incident-queue"]').addEventListener("change", function (e) {
     state[e.target.name] = e.target.value; renderQueue();
   });
+  /* keyboard: j and k walk the queue, 1 to 5 pick a verdict */
+  document.addEventListener("keydown", function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    var rows = [].slice.call(document.querySelectorAll(".row")), i = rows.findIndex(function (r) { return r.getAttribute("aria-current") === "true"; });
+    if (e.key === "j" || e.key === "k") {
+      var n = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === "j" ? 1 : -1)))];
+      if (n) { n.click(); n.focus({ preventScroll: true }); }
+    } else if (/^[1-5]$/.test(e.key)) {
+      var radios = document.querySelectorAll('input[name="verdict"]'); if (radios[e.key - 1]) radios[e.key - 1].checked = true;
+    }
+  });
+
   renderStatus(); renderQueue();
 })();
