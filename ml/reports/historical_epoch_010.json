@@ -1,0 +1,46 @@
+{
+  "windows": 319298,
+  "reports": 6066662,
+  "error_percentiles": {
+    "p50": 0.004231374625332801,
+    "p90": 0.010717326126605257,
+    "p95": 0.017019782852657345,
+    "p99": 0.03430522851424133,
+    "p99.9": 0.12045937566995743
+  },
+  "operating_threshold": 0.004946,
+  "flag_rate_at_operating_threshold": 0.33438668579195613,
+  "detector_vote_rates": {
+    "prediction_error": 0.33438668579195613,
+    "freeze_replay": 0.009445886386945572
+  },
+  "any_detector_flag_rate": 0.3407893830248001,
+  "two_or_more_detectors_flag_rate": 0.003043189154101547,
+  "by_motion": {
+    "underway": {
+      "reports": 1848947,
+      "prediction_error_flag_rate": 0.5757147176203536
+    },
+    "stationary": {
+      "reports": 4217715,
+      "prediction_error_flag_rate": 0.2285941558403069
+    }
+  },
+  "threshold_for_flag_rate": {
+    "0.05": 0.017019782852657345,
+    "0.01": 0.03430522851424133,
+    "0.005": 0.03807311560328414,
+    "0.001": 0.12045937566992836
+  },
+  "note": "Rates on real, unlabeled traffic. Where real spoofing is rare a flag rate is an upper bound on the false positive rate, not a detection score.",
+  "checkpoint": {
+    "path": "checkpoints\\epoch_010.pt",
+    "epoch": 10
+  },
+  "eval": {
+    "source": "historical",
+    "start": "2026-04-01T00:00:00",
+    "end": "2026-04-16T00:00:00",
+    "vessels": "validation_vessel_split (fraction=0.2)"
+  }
+}
