@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Console. GHAST</title>
+  <meta name="description" content="Work a flagged vessel incident: evidence, detector votes, agent log, and a verdict." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles/tokens.css" />
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/nav.css" />
+  <link rel="stylesheet" href="styles/pages.css" />
+  <link rel="stylesheet" href="styles/console.css" />
+  <script>document.documentElement.classList.remove("no-js");</script>
+</head>
+<body>
+<header class="header"><div class="header__in"><a class="mark" href="index.html" aria-label="GHAST home"><svg viewBox="0 0 28 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 17H12"/><path d="M19 10v4" stroke-dasharray="1.5 2"/><circle cx="19" cy="17" r="2.5"/><circle cx="19" cy="7" r="2.5" fill="currentColor"/></svg><span>GHAST</span></a><button class="header__menu" aria-expanded="false" aria-controls="nav-links">Menu</button><nav class="header__links" id="nav-links" aria-label="Primary" data-open="false"><a href="how-it-works.html">How it works</a><a href="console.html" aria-current="page">Console</a><a href="trust.html">Trust</a><a href="project.html">Project</a><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></nav></div></header>
+<main>
+<div data-module="status-strip" class="strip"><div class="wrap strip__in"><span class="strip__item">Checking the service.</span></div></div>
+<div class="wrap"><div class="console" data-view="queue">
+  <div class="queue" data-module="incident-queue">
+    <div class="queue__filters"><label class="sr" for="f-status">Status</label><select id="f-status" name="status"><option value="">All statuses</option><option value="reported">Reported</option><option value="escalated">Escalated</option><option value="resolved">Resolved</option></select><label class="sr" for="f-hypothesis">Hypothesis</label><select id="f-hypothesis" name="hypothesis"><option value="">All hypotheses</option><option value="jamming">Area jamming</option><option value="targeted_spoof">Targeted spoof</option><option value="equipment_fault">Equipment fault</option><option value="freeze_replay">Frozen track</option><option value="benign">Benign</option></select></div>
+    <div data-list></div>
+  </div>
+  <div class="detail" data-module="incident-detail"><p class="skeleton">Select an incident to read it.</p></div>
+</div></div>
+</main>
+<footer class="footer"><div class="wrap footer__in"><span>GHAST. GNSS and AIS Hazardous Spoofing Tracker.</span><a href="https://github.com/Vishmayraj/ghast" target="_blank" rel="noopener">Source</a></div></footer>
+  <script src="scripts/config.js"></script>
+  <script src="scripts/data/sample.js"></script>
+  <script src="scripts/data/live.js"></script>
+  <script src="scripts/data/api.js"></script>
+  <script src="scripts/console.js"></script>
+  <script src="scripts/ui.js"></script>
+  
+</body>
+</html>
