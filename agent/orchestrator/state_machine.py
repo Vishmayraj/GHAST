@@ -9,6 +9,7 @@ from typing import Any
 from features.summary import NORMAL_LABEL
 from models.bilstm.threshold import OPERATING_THRESHOLD
 from tools.freeze_corroboration import corroborate_freeze_replay
+from tools.stationary import window_is_stationary
 
 REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate with reviewed incidents in Stage 3.
 
@@ -29,6 +30,23 @@ SINGLE_DETECTOR_CONFIDENCE_CAP = 0.5
 # to be revisited once the checkpoint has a holdout evaluation (ml/evaluation/laya_export.py).
 PATTERN_MIN_CONFIDENCE = 0.7
 
+# Which Laya labels support which hypothesis. The classifier only "agrees" when its label is
+# the one the hypothesis implies, so a confident label for a different pattern neither lifts
+# the single-detector cap nor counts against the flag. equipment_fault has no matching Laya
+# label (the classes are all spoofing patterns), so nothing can agree with it.
+HYPOTHESIS_IMPLIED_PATTERNS: dict[str, frozenset[str]] = {
+    "freeze_replay": frozenset({"freeze_replay"}),
+    "targeted_spoof": frozenset({"teleport_jump", "gradual_drift", "impossible_kinematics"}),
+    "equipment_fault": frozenset(),
+}
+
+BENIGN_CONFIDENCE = 0.75
+
+# A lone prediction_error flag counts as weak only when its score is at most this multiple of
+# OPERATING_THRESHOLD ("slightly above threshold"). Uncalibrated placeholder; revisit once
+# reviewed incidents show where benign flags actually sit (scoring/review_stats.py).
+BENIGN_MAX_SCORE_MULTIPLE = 2.0
+
 class InvestigationState(str, Enum):
     RECEIVED = "received"; GATHERING_EVIDENCE = "gathering_evidence"; HYPOTHESIZING = "hypothesizing"; REPORTING = "reporting"; ESCALATING = "escalating"; DONE = "done"
 
@@ -46,6 +64,10 @@ class FlaggedAnomaly:
     # empty/untracked value, so it can't silently start over-escalating callers that
     # never populate this field at all.
     detector_votes: frozenset[str] = field(default_factory=frozenset)
+    # The scored window's first and last report times, written to incidents.window_start and
+    # incidents.window_end. None for callers that do not track a window.
+    window_start: Any = None
+    window_end: Any = None
 
 @dataclass(frozen=True)
 class InvestigationResult:
@@ -59,20 +81,30 @@ async def persist_incident(connection: Any, row: dict[str, Any]) -> None:
     """Store the complete audit trail in the schema-owned incidents record."""
     latitude, longitude = row["flagged_position"]
     await connection.execute(
-        """INSERT INTO incidents (mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text)
-           VALUES ($1,$2,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12)""",
+        """INSERT INTO incidents (mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, report_text, window_start, window_end)
+           VALUES ($1,$2,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12,$13,$14)""",
         row["mmsi"], row["flagged_at"], latitude, longitude, row["anomaly_score"], row["anomaly_type"],
         row["hypothesis"], row["confidence"], row["status"], json.dumps(row["evidence"], default=str),
         json.dumps(row["tool_call_log"], default=str), row.get("report_text"),
+        row.get("window_start"), row.get("window_end"),
     )
 
-def _pattern_vote(evidence: dict[str, Any]) -> str | None:
-    """"agrees" / "contradicts" / None (unavailable, low confidence, or not evidence at all)."""
+def _pattern_confident_label(evidence: dict[str, Any]) -> str | None:
+    """The Laya label, only when the tool ran and is at least PATTERN_MIN_CONFIDENCE sure."""
     result = evidence.get("pattern_classifier") or {}
     confidence = result.get("confidence")
     if not result.get("available") or confidence is None or confidence < PATTERN_MIN_CONFIDENCE:
         return None
-    return "contradicts" if result.get("pattern") == NORMAL_LABEL else "agrees"
+    return result.get("pattern")
+
+def _pattern_vote(evidence: dict[str, Any], hypothesis: str) -> str | None:
+    """"agrees" / "contradicts" / None (unavailable, low confidence, or a label that says nothing about this hypothesis)."""
+    label = _pattern_confident_label(evidence)
+    if label is None:
+        return None
+    if label == NORMAL_LABEL:
+        return "contradicts"
+    return "agrees" if label in HYPOTHESIS_IMPLIED_PATTERNS.get(hypothesis, frozenset()) else None
 
 def _apply_single_detector_cap(
     anomaly: FlaggedAnomaly, hypothesis: str, confidence: float,
@@ -88,18 +120,33 @@ def _apply_single_detector_cap(
     is a report-confidence tier this cap is meant to gate).
 
     The Laya pattern classifier (see PATTERN_MIN_CONFIDENCE) acts as one more vote: a
-    confident non-normal pattern lifts the cap, a confident "normal_track" applies it even
+    confident label that matches the hypothesis (HYPOTHESIS_IMPLIED_PATTERNS) lifts the cap, a confident "normal_track" applies it even
     when several detectors voted. `ignore_contradiction` is for the sequence-corroborated
     freeze/replay tier, whose evidence is deterministic and read straight off the track.
     """
     if hypothesis in ("jamming", "benign", "unresolved"):
         return hypothesis, confidence
-    vote = _pattern_vote(evidence or {})
+    vote = _pattern_vote(evidence or {}, hypothesis)
     if vote == "contradicts" and not ignore_contradiction:
         return hypothesis, min(confidence, SINGLE_DETECTOR_CONFIDENCE_CAP)
     if len(anomaly.detector_votes) == 1 and vote != "agrees":
         return hypothesis, min(confidence, SINGLE_DETECTOR_CONFIDENCE_CAP)
     return hypothesis, confidence
+
+def _is_weak_isolated_flag(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> bool:
+    """A lone, barely-over-threshold prediction_error flag on a stationary window with no corroboration.
+
+    Nothing else backs it: no other detector, no freeze corroboration, and no confident Laya
+    label for a spoofing pattern. Such flags resolve to benign instead of escalating.
+    """
+    if anomaly.detector_votes != frozenset({"prediction_error"}):
+        return False
+    if anomaly.anomaly_score > OPERATING_THRESHOLD * BENIGN_MAX_SCORE_MULTIPLE:
+        return False
+    label = _pattern_confident_label(evidence)
+    if label is not None and label != NORMAL_LABEL:
+        return False
+    return window_is_stationary(evidence.get("track_history") or {})
 
 def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[str, float]:
     """Use transparent Stage 1 rules until reviewed incidents support learned decisions."""
@@ -118,7 +165,7 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
     # prediction_error alone was found to miss. Empty detector_votes (untracked/legacy
     # callers) and prediction_error-only votes keep the original behavior.
     other_detector_votes = anomaly.detector_votes - {"prediction_error"}
-    if anomaly.anomaly_score < OPERATING_THRESHOLD and not other_detector_votes: return "benign", 0.75
+    if anomaly.anomaly_score < OPERATING_THRESHOLD and not other_detector_votes: return "benign", BENIGN_CONFIDENCE
     # investigate() populates evidence["freeze_corroboration"] (see
     # tools.freeze_corroboration.corroborate_freeze_replay) from track_history's raw
     # position sequence - an independent signal from the model's own anomaly_score.
@@ -133,7 +180,11 @@ def form_hypothesis(anomaly: FlaggedAnomaly, evidence: dict[str, Any]) -> tuple[
         # higher, auto-reporting confidence than the single-signal tiers below,
         # though still short of jamming's stronger direct zone match above.
         return _apply_single_detector_cap(anomaly, "freeze_replay", 0.8, evidence, ignore_contradiction=True)
-    if not evidence["incident_history"].get("similar_incidents"):
+    if _is_weak_isolated_flag(anomaly, evidence):
+        return "benign", BENIGN_CONFIDENCE
+    # Only this vessel's own history argues against a one-off targeted event. The same
+    # pattern on other vessels (same_pattern_elsewhere) is context, not a reason to downgrade.
+    if not evidence["incident_history"].get("same_vessel"):
         return _apply_single_detector_cap(anomaly, "targeted_spoof", 0.72, evidence)
     return _apply_single_detector_cap(anomaly, "equipment_fault", 0.55, evidence)
 
@@ -162,8 +213,9 @@ async def investigate(anomaly: FlaggedAnomaly, tools: dict[str, Tool], persist: 
     evidence["detector_corroboration"] = {"votes": sorted(anomaly.detector_votes), "count": len(anomaly.detector_votes)}
     hypothesis, confidence = form_hypothesis(anomaly, evidence)
     state = InvestigationState.REPORTING if confidence >= REPORT_CONFIDENCE_THRESHOLD else InvestigationState.ESCALATING
-    row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude)}
-    if state is InvestigationState.REPORTING and report is not None:
+    row = {"mmsi": anomaly.mmsi, "flagged_at": anomaly.flagged_at, "anomaly_score": anomaly.anomaly_score, "anomaly_type": anomaly.anomaly_type, "hypothesis": hypothesis, "confidence": confidence, "status": "reported" if state is InvestigationState.REPORTING else "escalated", "evidence": evidence, "tool_call_log": log, "flagged_position": (anomaly.latitude, anomaly.longitude), "window_start": anomaly.window_start, "window_end": anomaly.window_end}
+    # A benign call needs no drafted narrative (and no model call spent on it).
+    if state is InvestigationState.REPORTING and report is not None and hypothesis != "benign":
         report_text = await report(row)
         # An optional provider may return an empty string after a handled outage or
         # rate limit; keep the database value NULL rather than recording a fake report.

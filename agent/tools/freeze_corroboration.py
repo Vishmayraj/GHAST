@@ -24,12 +24,24 @@ from typing import Any
 
 from features.extract import FREEZE_DISPLACEMENT_EPSILON_KNOTS, MISSING_VALUE, implied_speed_knots
 
+# Corroboration looks at the same 20-report window the detectors scored, not the whole
+# track_history span. track_history ends at the flag, so the last N positions are the
+# window ending at the flagged report.
+FREEZE_WINDOW_REPORTS = 20
+
+# Frozen pairs needed before the window counts as corroborated. One bad SOG at rest
+# produces a single frozen pair, so one pair must never be enough.
+# Uncalibrated: 3 is a starting value, to be revisited with reviewed incidents
+# (scoring/review_stats.py).
+MIN_FROZEN_PAIRS = 3
+
 
 def corroborate_freeze_replay(track_history: dict[str, Any]) -> dict[str, Any]:
     """Independently check track_history's raw position sequence for a freeze/replay pattern.
 
     Returns {"matched": bool, "frozen_reports": int, "total_pairs": int}. "matched" is
-    True when at least one consecutive pair of reports claims ongoing movement
+    True when at least MIN_FROZEN_PAIRS consecutive pairs of reports, among the last
+    FREEZE_WINDOW_REPORTS positions, claim ongoing movement
     (`sog_knots` above the shared epsilon) while the position itself barely moved
     (`implied_speed_knots` between the two reports is at or below
     FREEZE_DISPLACEMENT_EPSILON_KNOTS) - the same signal
@@ -43,7 +55,7 @@ def corroborate_freeze_replay(track_history: dict[str, Any]) -> dict[str, Any]:
     call this even when track_history's own tool call failed or returned nothing,
     without that failure silently becoming a match.
     """
-    positions = track_history.get("positions") or []
+    positions = (track_history.get("positions") or [])[-FREEZE_WINDOW_REPORTS:]
     frozen_reports = 0
     total_pairs = 0
     for previous, current in zip(positions, positions[1:]):
@@ -58,4 +70,4 @@ def corroborate_freeze_replay(track_history: dict[str, Any]) -> dict[str, Any]:
         total_pairs += 1
         if implied_speed <= FREEZE_DISPLACEMENT_EPSILON_KNOTS and sog > FREEZE_DISPLACEMENT_EPSILON_KNOTS:
             frozen_reports += 1
-    return {"matched": frozen_reports > 0, "frozen_reports": frozen_reports, "total_pairs": total_pairs}
+    return {"matched": frozen_reports >= MIN_FROZEN_PAIRS, "frozen_reports": frozen_reports, "total_pairs": total_pairs}

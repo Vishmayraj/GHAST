@@ -10,7 +10,7 @@ import pytest
 
 from models.bilstm.threshold import OPERATING_THRESHOLD
 from orchestrator.state_machine import (
-    PATTERN_MIN_CONFIDENCE, REPORT_CONFIDENCE_THRESHOLD, SINGLE_DETECTOR_CONFIDENCE_CAP,
+    HYPOTHESIS_IMPLIED_PATTERNS, PATTERN_MIN_CONFIDENCE, REPORT_CONFIDENCE_THRESHOLD, SINGLE_DETECTOR_CONFIDENCE_CAP,
     FlaggedAnomaly, form_hypothesis, investigate,
 )
 from tools.pattern_classifier import WINDOW_LENGTH, build_pattern_classifier, recent_window
@@ -48,7 +48,7 @@ def classifier_evidence(label: str, confidence: float, available: bool = True) -
 
 
 def base_evidence(**extra) -> dict:
-    return {"jamming_zones": {"matched": False}, "incident_history": {"similar_incidents": []}, **extra}
+    return {"jamming_zones": {"matched": False}, "incident_history": {"same_vessel": [], "same_pattern_elsewhere": []}, **extra}
 
 
 # --- the tool ---------------------------------------------------------------------------
@@ -147,6 +147,40 @@ def test_jamming_and_sequence_corroborated_freeze_ignore_a_contradiction() -> No
     assert freeze == ("freeze_replay", 0.8)
 
 
+@requires_operating_threshold
+def test_laya_agrees_only_when_the_label_matches_the_hypothesis() -> None:
+    # freeze_replay hypothesis (sequence-corroborated) is capped down to one detector; only a
+    # freeze_replay label lifts it, a different confident spoofing label does not.
+    anomaly = anomaly_at(25, votes=frozenset({"prediction_error"}))
+    freeze = {"freeze_corroboration": {"matched": True}}
+    _, wrong_label = form_hypothesis(anomaly, base_evidence(**freeze, **classifier_evidence("teleport_jump", 0.95)))
+    _, right_label = form_hypothesis(anomaly, base_evidence(**freeze, **classifier_evidence("freeze_replay", 0.95)))
+    assert wrong_label == SINGLE_DETECTOR_CONFIDENCE_CAP
+    assert right_label == 0.8
+
+
+@requires_operating_threshold
+def test_freeze_replay_label_does_not_lift_the_cap_on_a_targeted_spoof_hypothesis() -> None:
+    anomaly = anomaly_at(25, votes=frozenset({"prediction_error"}))
+    hypothesis, confidence = form_hypothesis(anomaly, base_evidence(**classifier_evidence("freeze_replay", 0.95)))
+    assert hypothesis == "targeted_spoof"
+    assert confidence == SINGLE_DETECTOR_CONFIDENCE_CAP
+
+
+@requires_operating_threshold
+def test_nothing_in_laya_agrees_with_equipment_fault() -> None:
+    anomaly = anomaly_at(25, votes=frozenset({"prediction_error"}))
+    history = {"same_vessel": [{"id": "a"}], "same_pattern_elsewhere": []}
+    evidence = {**base_evidence(**classifier_evidence("gradual_drift", 0.95)), "incident_history": history}
+    assert form_hypothesis(anomaly, evidence) == ("equipment_fault", SINGLE_DETECTOR_CONFIDENCE_CAP)
+
+
+def test_every_implied_label_is_a_real_laya_label() -> None:
+    from features.summary import PATTERN_LABELS
+    for hypothesis, labels in HYPOTHESIS_IMPLIED_PATTERNS.items():
+        assert labels <= set(PATTERN_LABELS), hypothesis
+
+
 # --- investigate() wiring ---------------------------------------------------------------
 
 async def _const(value):
@@ -156,7 +190,7 @@ async def _const(value):
 
 async def _tools(pattern_tool=None) -> dict:
     tools = {"track_history": await _const({"positions": []}), "jamming_zones": await _const({"matched": False}),
-             "incident_history": await _const({"similar_incidents": []})}
+             "incident_history": await _const({"same_vessel": [], "same_pattern_elsewhere": []})}
     if pattern_tool is not None:
         tools["pattern_classifier"] = pattern_tool
     return tools
