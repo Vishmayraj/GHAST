@@ -223,3 +223,25 @@ async def test_investigate_without_the_tool_is_unchanged() -> None:
     result = await investigate(anomaly_at(25), await _tools(), persist)
     assert "pattern_classifier" not in result.evidence
     assert len(saved[0]["tool_call_log"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_laya_missing_logs_one_line_per_outage_not_one_per_incident(caplog) -> None:
+    import logging
+    state = {"up": False}
+
+    def predict(text):
+        if not state["up"]:
+            raise ConnectionError("down")
+        return {"label": "normal_track", "confidence": 0.9, "probabilities": {}}
+
+    tool = build_pattern_classifier(_get_track, predict)
+    anomaly = anomaly_at(24)
+    with caplog.at_level(logging.INFO, logger="ghast.agent.pattern_classifier"):
+        for _ in range(3):
+            assert (await tool(anomaly))["available"] is False
+        state["up"] = True
+        assert (await tool(anomaly))["available"] is True
+    messages = [r.getMessage() for r in caplog.records]
+    assert sum(m.startswith("laya missing") for m in messages) == 1 and messages.count("laya back") == 1
+    assert not any(r.exc_info for r in caplog.records)

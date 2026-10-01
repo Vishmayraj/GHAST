@@ -77,7 +77,23 @@ def load_laya_predictor(model_path: str, device: str | None = None) -> Predict:
 def build_pattern_classifier(get_track: GetTrack, predict: Predict | None):
     """Return an agent `Tool`. With `predict=None` it is the documented neutral stub."""
 
+    # Laya is not always up. One log line when it goes missing and one when it returns, so the
+    # logs say what happened without a line per incident or a traceback.
+    state = {"missing": None}
+
+    def note(result: dict[str, Any]) -> dict[str, Any]:
+        missing = not result["available"]
+        if missing and state["missing"] is not True:
+            logger.warning("laya missing: %s", result["reason"])
+        elif not missing and state["missing"] is True:
+            logger.info("laya back")
+        state["missing"] = missing
+        return result
+
     async def pattern_classifier(anomaly: Any) -> dict[str, Any]:
+        return note(await _classify(anomaly))
+
+    async def _classify(anomaly: Any) -> dict[str, Any]:
         if predict is None:
             return unavailable("no Laya model configured (set GHAST_LAYA_MODEL)")
         try:
@@ -87,7 +103,6 @@ def build_pattern_classifier(get_track: GetTrack, predict: Predict | None):
                 return unavailable(f"only {len(window)} reports up to the flag, need {WINDOW_LENGTH}")
             result = await asyncio.to_thread(lambda: predict(summarize_rows(window)))
         except Exception as error:  # noqa: BLE001 - an optional tool must never fail the investigation
-            logger.exception("pattern classifier failed mmsi=%s", getattr(anomaly, "mmsi", None))
             return unavailable(f"classifier error: {type(error).__name__}")
         probabilities = dict(result.get("probabilities") or {})
         confidence = result.get("confidence")
