@@ -49,7 +49,7 @@ So the detection and agent layers are ahead of the calendar and the delivery lay
 | Experiment tracking in MLflow | only offline scoring logs to MLflow; training does not | partial |
 | Real-time scoring service | `scoring/live_scorer.py` polls every 30 s and calls the agent. No HTTP endpoint | partial |
 | Physical-limits check per vessel class | proposed in comments, not built | not built |
-| DBSCAN fleet-wide check (Stage 2) | `ml/models/clustering/` is a README. The landing site's mock data depicts a DBSCAN check as if it existed | not built (and misrepresented on the site) |
+| DBSCAN fleet-wide check (Stage 2) | `ml/models/clustering/fleet_cluster.py` (pure numpy DBSCAN, uncalibrated, tested with hand-made layouts); the fleet-context agent uses it over incidents already stored, as evidence. It does not feed `form_hypothesis`. Never run on real data | partial |
 | Transformer model (Stage 2) | no directory, no code | out of stage |
 | False-positive calibration (Stage 3) | threshold was tuned and reported on the same synthetic set. Live false positive rate is unmeasured | not built, and now the most urgent quality question |
 | (not in HLD) rule detectors | freeze/replay and speed-jump detectors vote alongside the BiLSTM | not in HLD |

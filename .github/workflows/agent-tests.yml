@@ -2,9 +2,9 @@ name: agent-tests
 on:
   push:
     branches: [main]
-    paths: ["agent/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
+    paths: ["agent/**", "ml/models/clustering/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
   pull_request:
-    paths: ["agent/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
+    paths: ["agent/**", "ml/models/clustering/**", "ml/requirements*.txt", ".github/workflows/agent-tests.yml"]
 defaults:
   run:
     working-directory: agent

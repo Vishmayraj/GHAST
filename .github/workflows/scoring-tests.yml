@@ -2,9 +2,9 @@ name: scoring-tests
 on:
   push:
     branches: [main]
-    paths: ["scoring/**", "agent/**", "ml/features/**", "ml/evaluation/**", "ml/models/bilstm/threshold.py", ".github/workflows/scoring-tests.yml"]
+    paths: ["scoring/**", "agent/**", "ml/features/**", "ml/evaluation/**", "ml/models/clustering/**", "ml/models/bilstm/threshold.py", ".github/workflows/scoring-tests.yml"]
   pull_request:
-    paths: ["scoring/**", "agent/**", "ml/features/**", "ml/evaluation/**", "ml/models/bilstm/threshold.py", ".github/workflows/scoring-tests.yml"]
+    paths: ["scoring/**", "agent/**", "ml/features/**", "ml/evaluation/**", "ml/models/clustering/**", "ml/models/bilstm/threshold.py", ".github/workflows/scoring-tests.yml"]
 defaults:
   run:
     working-directory: scoring

@@ -64,7 +64,7 @@ def fleet_context_from(evidence: dict[str, Any]) -> dict[str, Any] | None:
     nearby = int(fleet.get("nearby_incidents") or 0)
     return {
         "scope": scope,
-        "cluster_vessels": nearby + 1 if scope == "area" else 1,
+        "cluster_vessels": int(fleet.get("cluster_vessels") or (nearby + 1 if scope == "area" else 1)),
         "neighbours_checked": int(fleet.get("neighbours_checked") or 0),
         "radius_km": None,
         "isolated": True if scope == "isolated" else False if scope == "area" else None,

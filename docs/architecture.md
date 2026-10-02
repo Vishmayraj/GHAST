@@ -131,7 +131,7 @@ Implemented and working as far as the code and tests show: the ingestion path, f
 
 Experimental (in the code but unvalidated on real events): the freeze detector and corroboration, the single-detector confidence cap, the Laya vote, all confidence values.
 
-Proposed and not built: per-vessel-class or per-region thresholds, fleet-wide clustering (DBSCAN), the backend API, the dashboard, transformer models, automated jamming zone ingestion, database migrations.
+Proposed and not built: per-vessel-class or per-region thresholds, tuning of the fleet clustering parameters, transformer models, automated jamming zone ingestion, database migrations.
 
 Currently broken or misleading:
 
@@ -190,4 +190,4 @@ Details and variables: `docs/infrastructure.md`.
 | `ml/README.md`, `ml/training/README.md` | describe MLflow configs for training; training does not use MLflow |
 | `backend/models/README.md` | its second paragraph describes only `vessel_position` and `vessel_static`; the schema also has `incidents` and `jamming_zones` |
 | `ImplementationPlans/old/*` | superseded plans, kept for history; several status lines are stale and they describe the removed synthetic evaluation. Current plans are in `ImplementationPlans/` |
-| `frontend/site/scripts/mock-data.js` | depicts features (DBSCAN check, zone counts, meter deviations, auto-dismiss) that do not exist |
+| `frontend/site/scripts/data/sample.js` | sample incidents with fictional vessels, tagged "Sample data" in the console; some evidence sentences (meters, seconds) describe things no stored field holds |

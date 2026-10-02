@@ -31,7 +31,7 @@ class Db:
         if query == NEIGHBOURS_QUERY:
             return [{"km": float(i + 1)} for i in range(self.neighbours)]
         if query == NEARBY_INCIDENTS_QUERY:
-            return [{"hypothesis": "jamming"} for _ in range(self.incidents)]
+            return [{"mmsi": 1000 + i, "hypothesis": "jamming", "lat": 51.0 + 0.01 * (i + 1), "lon": 4.0, "flagged_at": T0} for i in range(self.incidents)]
         return self.history
 
     async def fetchrow(self, query, *args):
@@ -41,8 +41,8 @@ class Db:
 
 
 # --- fleet context -------------------------------------------------------------------------
-def fleet_obs(neighbours, incidents):
-    return {"vessels_nearby": {"count": neighbours}, "incidents_nearby": {"count": incidents}}
+def fleet_obs(neighbours, incidents, cluster=None):
+    return {"vessels_nearby": {"count": neighbours}, "incidents_nearby": {"count": incidents, "cluster_vessels": incidents + 1 if cluster is None else cluster}}
 
 
 @pytest.mark.parametrize("neighbours,incidents,scope", [(10, 0, "isolated"), (10, 3, "area"), (1, 0, "insufficient"), (0, 2, "area")])
@@ -69,6 +69,58 @@ async def test_fleet_agent_without_llm_queries_both_tools_and_decides():
     db = Db(neighbours=12, incidents=0)
     run = await build_fleet_context_agent(db, ctx(), None, None).run({})
     assert run.mode == "fallback" and run.decision["scope"] == "isolated" and {NEIGHBOURS_QUERY, NEARBY_INCIDENTS_QUERY} <= set(db.queries)
+
+
+class IncidentRows(Db):
+    def __init__(self, rows):
+        super().__init__()
+        self.rows = rows
+
+    async def fetch(self, query, *args):
+        return self.rows if query == NEARBY_INCIDENTS_QUERY else []
+
+
+def incident_row(mmsi, lat, lon=4.0, hours=0.0):
+    from datetime import timedelta
+    return {"mmsi": mmsi, "hypothesis": "benign", "lat": lat, "lon": lon, "flagged_at": T0 + timedelta(hours=hours)}
+
+
+async def nearby(rows, radius=25):
+    agent = build_fleet_context_agent(IncidentRows(rows), ctx(), None, None)
+    return await agent._tools["incidents_nearby"].fn({"radius_km": radius})
+
+
+@pytest.mark.asyncio
+async def test_incidents_close_together_form_a_cluster_with_this_vessel():
+    result = await nearby([incident_row(2, 51.02), incident_row(3, 51.04)])
+    assert result["count"] == 2 and result["cluster_vessels"] == 3
+
+
+@pytest.mark.asyncio
+async def test_incidents_inside_the_radius_but_far_from_each_other_are_not_an_area():
+    # both within 100 km of the flag, but each is 55 km from it and 111 km from the other
+    result = await nearby([incident_row(2, 51.5), incident_row(3, 50.5)], radius=100)
+    assert result["count"] == 2 and result["cluster_vessels"] == 1
+
+
+@pytest.mark.asyncio
+async def test_incidents_from_other_hours_do_not_join_the_cluster():
+    result = await nearby([incident_row(2, 51.02, hours=3), incident_row(3, 51.04, hours=-4)])
+    assert result["count"] == 2 and result["cluster_vessels"] == 1
+
+
+@pytest.mark.asyncio
+async def test_fleet_agent_calls_a_real_cluster_an_area_and_scattered_incidents_isolated():
+    clustered = IncidentRows([incident_row(2, 51.02), incident_row(3, 51.04)])
+    clustered.neighbours = 0
+    run = await build_fleet_context_agent(clustered, ctx(), None, None).run({})
+    assert run.decision["scope"] == "area" and run.decision["cluster_vessels"] == 3
+
+
+def test_fleet_validate_refuses_area_when_incidents_are_not_a_cluster():
+    with pytest.raises(ValueError, match="cluster of at least 3"):
+        fleet_validate({"scope": "area", "note": "n"}, fleet_obs(9, 5, cluster=1))
+    assert fleet_validate({"scope": "area", "note": "n"}, fleet_obs(9, 2, cluster=3))["cluster_vessels"] == 3
 
 
 @pytest.mark.asyncio

@@ -223,6 +223,8 @@ def test_shaping_fleet_context_insufficient_is_neither_isolated_nor_area():
     area = shaping.fleet_context_from({"fleet_context": {"scope": "area", "neighbours_checked": 9, "nearby_incidents": 4, "note": "n"}})
     assert area["isolated"] is False and area["cluster_vessels"] == 5
     assert shaping.fleet_context_from({}) is None
+    stored = shaping.fleet_context_from({"fleet_context": {"scope": "area", "neighbours_checked": 9, "nearby_incidents": 4, "cluster_vessels": 3, "note": "n"}})
+    assert stored["cluster_vessels"] == 3  # the agent's DBSCAN count wins over incidents + 1
 
 
 def test_shaping_survives_empty_evidence_and_text_json():

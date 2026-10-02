@@ -11,19 +11,20 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
 | `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 37 | `ml/` |
-| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report`, `test_agent_runtime`, `test_threshold_agent`, `test_incident_agents`, `test_incident_pipeline` | 146 | `agent/` |
+| `ml/models/clustering/tests` | `test_fleet_cluster.py` | 13 | `ml/` |
+| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report`, `test_agent_runtime`, `test_threshold_agent`, `test_incident_agents`, `test_incident_pipeline` | 151 | `agent/` |
 | `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py`, `test_thresholds_cli.py` | 37 | `scoring/` |
 | `backend/tests` | `test_api.py` | 22 (29 cases, one test is parametrized over 8 routes) | `backend/` |
 | `scripts/tests` | `test_load_jamming_zones.py` | 15 (25 cases, a few are parametrized) | `scripts/` |
-| total | 32 files | 318 | |
+| total | 33 files | 336 | |
 
-The ML total is 90. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `frontend/`, `infra/`, or `scripts/import_marinecadastre.py`. The frontend modules were exercised once under jsdom against the real API app with a fake pool; that check is not in the repo.
+The ML total is 103 (90 plus the 13 clustering tests). `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `frontend/`, `infra/`, or `scripts/import_marinecadastre.py`. The frontend modules were exercised once under jsdom against the real API app with a fake pool; that check is not in the repo.
 
 Each package has a `pytest.ini` with a `pythonpath` line so that bare `pytest` resolves the flat imports (`ml/pytest.ini`: `.`; `agent/pytest.ini`: `. ../ml`; `scoring/pytest.ini`: `. ../ml ../agent`). `ingestion/` has no `pytest.ini`; its tests import `normalizer.normalize` and work when run from `ingestion/`.
 
 ```text
 cd ingestion && pytest tests -v
-cd ml        && pytest features/tests training/tests models/bilstm/tests evaluation/tests -v
+cd ml        && pytest features/tests training/tests models/bilstm/tests models/clustering/tests evaluation/tests -v
 cd agent     && pytest tests -v
 cd scoring   && pytest tests -v
 cd backend   && pytest tests -v
@@ -37,7 +38,8 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 | Suite | Third-party packages actually needed |
 |---|---|
 | `ingestion/tests` | `pytest` only (the normalizer imports nothing outside the stdlib). `requirements-dev.txt` also installs `websockets`, `asyncpg`, `minio`, which the tests do not import. |
-| `ml/*` | `torch`, `numpy`, `asyncpg` (imported by `features.pipeline`), `pytest`. `requirements-dev.txt` also brings `mlflow`, `scikit-learn`, `pandas`, `psycopg`, `tqdm`, `psutil`; only `psutil` is imported by code under test (inside `score_checkpoint.run`, which is not tested). |
+| `ml/models/clustering/tests` | `numpy`, `pytest` only. |
+| `ml/*` (the rest) | `torch`, `numpy`, `asyncpg` (imported by `features.pipeline`), `pytest`. `requirements-dev.txt` also brings `mlflow`, `scikit-learn`, `pandas`, `psycopg`, `tqdm`, `psutil`; only `psutil` is imported by code under test (inside `score_checkpoint.run`, which is not tested). |
 | `agent/tests` | `numpy`, `asyncpg`, `pytest`, `pytest-asyncio`. No torch: `state_machine` imports only `models.bilstm.threshold`, which is a constant. |
 | `scoring/tests` | same as agent. `live_scorer` imports torch only inside `load_model_scorer`, which is not called. |
 | `scripts/tests` | `pytest`, `pytest-asyncio`. The loader imports `asyncpg` only inside `_run`, which the tests replace. |
@@ -47,7 +49,7 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 
 ## CI
 
-`.github/workflows/` has nine workflows, each installing the matching `requirements-dev.txt` on Python 3.12 and running one test directory:
+`.github/workflows/` has ten workflows, each installing the matching `requirements-dev.txt` on Python 3.12 and running one test directory:
 
 | Workflow | Runs | Triggers on changes to |
 |---|---|---|
@@ -56,10 +58,11 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 | `ml-training-tests` | `ml/training/tests` | `ml/training/**`, `ml/features/**` |
 | `ml-model-tests` | `ml/models/bilstm/tests` | `ml/models/bilstm/**`, `ml/training/**`, `ml/features/**` |
 | `ml-evaluation-tests` | `ml/evaluation/tests` | `ml/evaluation/**`, `ml/features/**`, `ml/models/bilstm/**` |
-| `agent-tests` | `agent/tests` | `agent/**`, `ml/requirements*.txt` |
+| `ml-clustering-tests` | `ml/models/clustering/tests` | `ml/models/clustering/**` |
+| `agent-tests` | `agent/tests` | `agent/**`, `ml/models/clustering/**`, `ml/requirements*.txt` |
 | `scripts-tests` | `scripts/tests` | `scripts/**`, `backend/models/schema.sql` |
 | `backend-tests` | `backend/tests` | `backend/**`, `scoring/review_stats.py` |
-| `scoring-tests` | `scoring/tests` | `scoring/**`, `agent/**`, `ml/features/**`, `ml/evaluation/**`, `ml/models/bilstm/threshold.py` |
+| `scoring-tests` | `scoring/tests` | `scoring/**`, `agent/**`, `ml/features/**`, `ml/evaluation/**`, `ml/models/clustering/**`, `ml/models/bilstm/threshold.py` |
 
 Gaps in the path filters, from the lists themselves: a change to `ml/features/**` does not run `agent-tests`, although `agent` imports `features.extract` and `features.summary`. A change to `ml/training/**` does not run `ml-evaluation-tests`, although `score_checkpoint` imports `training.dataset_cache`. `ml-model-tests` uses `ml/training/**`, so it covers that import for the model test only.
 
