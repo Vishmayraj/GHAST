@@ -224,3 +224,8 @@ CREATE INDEX IF NOT EXISTS incidents_console_idx
     ON incidents (tier DESC, priority DESC NULLS LAST, flagged_at DESC) WHERE review_verdict IS NULL;
 CREATE INDEX IF NOT EXISTS incidents_report_expiry_idx
     ON incidents (report_expires_at) WHERE report_text IS NOT NULL;
+
+-- Result of the report verifier agent for the stored draft (agents/report_verifier.py):
+-- {"verdict": "pass"|"fail", "issues": [...], "attempts": n}. A failing draft is stored with a
+-- visible warning at the top of report_text, and this column says why.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS report_verification JSONB;

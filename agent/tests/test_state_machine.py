@@ -293,11 +293,6 @@ async def test_persist_incident_writes_window_columns() -> None:
     assert args[-3:] == (start, end, "A")
 
 
-def test_the_report_draft_threshold_sits_above_the_reported_line() -> None:
-    from orchestrator.state_machine import REPORT_DRAFT_CONFIDENCE_THRESHOLD
-    assert REPORT_DRAFT_CONFIDENCE_THRESHOLD > REPORT_CONFIDENCE_THRESHOLD
-
-
 @pytest.mark.asyncio
 async def test_a_reported_incident_is_never_given_report_text_during_investigation() -> None:
     saved = []

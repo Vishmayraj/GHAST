@@ -78,23 +78,29 @@ def _compact_report_input(incident: dict[str, Any]) -> dict[str, Any]:
         "freeze_corroboration": evidence.get("freeze_corroboration"),
         "detector_corroboration": evidence.get("detector_corroboration"),
         "pattern_classifier": evidence.get("pattern_classifier"),
+        "fleet_context": evidence.get("fleet_context"),
+        "challenge": incident.get("challenge"),
     }
     return {
         key: incident.get(key)
-        for key in ("mmsi", "flagged_at", "anomaly_score", "anomaly_type", "hypothesis", "confidence", "status")
+        for key in ("mmsi", "flagged_at", "anomaly_score", "anomaly_type", "hypothesis", "confidence", "status", "tier")
     } | {"evidence": compact_evidence}
 
 
-async def draft_report(incident: dict[str, Any], client: Any) -> str:
+async def draft_report(incident: dict[str, Any], client: Any, feedback: list[str] | None = None) -> str:
     """Only reporting calls an LLM; all upstream classification is deterministic and auditable."""
     report_input = _compact_report_input(incident)
+    correction = ""
+    if feedback:
+        # A previous draft failed verification against the incident record; say exactly why.
+        correction = "\nYour previous draft was rejected for these problems. Fix them and use only the supplied facts:\n- " + "\n- ".join(feedback) + "\n"
     completion = await client.chat.completions.create(
         model=report_model(),
         max_tokens=_report_max_tokens(),
         messages=[
             {
                 "role": "user",
-                "content": REPORT_PROMPT_PREFIX
+                "content": REPORT_PROMPT_PREFIX + correction
                 + json.dumps(report_input, default=str, separators=(",", ":")),
             }
         ],

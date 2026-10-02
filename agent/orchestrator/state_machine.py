@@ -15,12 +15,9 @@ REPORT_CONFIDENCE_THRESHOLD = 0.7  # Uncalibrated Stage 1 placeholder; calibrate
 # The line between status "reported" (at or above) and "escalated" (below). It no longer
 # triggers any report: nothing is drafted during the investigation (see the next constant).
 
-# Higher bar for drafting an LLM report at an analyst's request (report_generator/on_demand.py).
-# Reports are never drafted automatically, so no tokens or storage are spent on incidents
-# nobody opened. With the current tiers this admits jamming (0.85) and a corroborated
-# freeze_replay (0.8) and leaves targeted_spoof (0.72) and equipment_fault (0.55) out.
-# Uncalibrated placeholder; revisit with reviewed incidents (scoring/review_stats.py).
-REPORT_DRAFT_CONFIDENCE_THRESHOLD = 0.8
+# Reports are not gated by confidence. Tier A incidents get one on a button press and tier B
+# incidents get one automatically (report_generator/on_demand.py); the tier comes from the
+# score against thresholds A and B (agent/threshold_agent).
 
 # Per ImplementationPlans/old/Sem5_BigPass_LiveScoring_And_Laya.md section 3: a flag where
 # only one detector fired is weaker evidence than one where two or more independently

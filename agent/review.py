@@ -5,15 +5,19 @@
     python review.py show <incident-id>
     python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAME] [--force]
     python review.py report <incident-id> [--force]
+    python review.py delete-report <incident-id>
 
 `list` shows unreviewed incidents, newest first. `show` prints the stored evidence and the
 20-report summary text the Laya classifier reads. `verdict` records the analyst's call and
 sets status = 'resolved', which is what lifts the live scorer's debounce for that vessel
 (scoring/live_scorer.py only skips vessels with an incident that is not resolved).
 
-`report` drafts an LLM report for one incident on request (needs GROQ_API_KEY). Reports are
-never drafted automatically, and only incidents at or above REPORT_DRAFT_CONFIDENCE_THRESHOLD
-are eligible. This command is the stand-in for the dashboard's "generate report" button.
+`list` puts tier B incidents (score at or above threshold B, report drafted automatically)
+above tier A, then orders by the triage agent's priority, then newest first.
+
+`report` drafts an LLM report for any incident on request (needs GROQ_API_KEY); tier B incidents
+already have one. It is the stand-in for the console's "generate report" button. A report lives
+24 hours; `delete-report` removes one on purpose. Incidents and evidence are never deleted.
 
 Only incidents that already exist are reviewed. Nothing in this module creates one.
 """
@@ -40,23 +44,23 @@ for _package_dir in ("ml", "agent"):
         sys.path.append(_path)
 
 from features.summary import summarize_rows  # noqa: E402
-from orchestrator.state_machine import REPORT_DRAFT_CONFIDENCE_THRESHOLD  # noqa: E402
 from tools.pattern_classifier import WINDOW_LENGTH, recent_window  # noqa: E402
 
 VERDICTS = ("confirmed_spoof", "jamming", "equipment_fault", "benign", "unclear")
 
 LIST_QUERY = """
 SELECT id, mmsi, flagged_at, window_start, window_end, hypothesis, confidence, status,
-       anomaly_type, (report_text IS NOT NULL) AS has_report
+       anomaly_type, tier, priority, report_delete_reason, (report_text IS NOT NULL) AS has_report
 FROM incidents
 WHERE review_verdict IS NULL
-ORDER BY flagged_at DESC
+ORDER BY tier DESC, priority DESC NULLS LAST, flagged_at DESC
 LIMIT $1
 """
 
 SHOW_QUERY = """
 SELECT id, mmsi, flagged_at, window_start, window_end, hypothesis, confidence, status,
-       anomaly_type, anomaly_score, evidence, report_text,
+       anomaly_type, anomaly_score, evidence, report_text, tier, priority, challenge,
+       report_expires_at, report_delete_reason, report_verification,
        review_verdict, reviewed_by, reviewed_at, review_notes
 FROM incidents
 WHERE id = $1::uuid
@@ -112,19 +116,27 @@ def format_list(rows: Sequence[dict[str, Any]]) -> str:
     for row in rows:
         confidence = row.get("confidence")
         confidence_text = "n/a" if confidence is None else f"{confidence:.2f}"
-        if row.get("has_report"):
-            report = f"stored (python review.py show {row['id']})"
-        elif confidence is not None and confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD:
-            report = f"can be drafted (python review.py report {row['id']})"
-        else:
-            report = "none (below the report threshold)"
+        report = _report_state(row, bool(row.get("has_report")))
+        tier, priority = row.get("tier") or "A", row.get("priority")
+        priority_text = "" if priority is None else f" priority={priority:.2f}"
         blocks.append(
-            f"{row['id']}  flagged {_stamp(row['flagged_at'])}  mmsi={row['mmsi']}\n"
+            f"[{tier}]{priority_text} {row['id']}  flagged {_stamp(row['flagged_at'])}  mmsi={row['mmsi']}\n"
             f"  hypothesis={row['hypothesis']} confidence={confidence_text} status={row['status']}\n"
             f"  votes={row.get('anomaly_type') or 'n/a'}  span={_stamp(row.get('window_start'))} to {_stamp(row.get('window_end'))}\n"
             f"  report: {report}"
         )
     return "\n\n".join(blocks)
+
+
+def _report_state(row: dict[str, Any], stored: bool) -> str:
+    if stored:
+        return f"stored (python review.py show {row['id']})"
+    reason = row.get("report_delete_reason")
+    if reason == "expired":
+        return f"expired after 24h (regenerate: python review.py report {row['id']})"
+    if reason == "analyst":
+        return f"deleted by an analyst (regenerate: python review.py report {row['id']})"
+    return f"none yet (draft one: python review.py report {row['id']})"
 
 
 def window_summary(evidence: dict[str, Any], flagged_at: Any) -> str:
@@ -157,19 +169,12 @@ def _compact_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
-def _report_hint(row: dict[str, Any]) -> str:
-    confidence = row.get("confidence")
-    if confidence is not None and confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD:
-        return f"none yet (draft one with: python review.py report {row['id']})"
-    return f"none (confidence is below the {REPORT_DRAFT_CONFIDENCE_THRESHOLD} needed to draft a report)"
-
-
 def format_show(row: dict[str, Any]) -> str:
     evidence = _as_json(row.get("evidence")) or {}
     lines = [
         f"incident {row['id']}",
         f"mmsi={row['mmsi']}  flagged {_stamp(row['flagged_at'])}  score={row['anomaly_score']:.6f}  votes={row.get('anomaly_type') or 'n/a'}",
-        f"hypothesis={row['hypothesis']}  confidence={row.get('confidence')}  status={row['status']}",
+        f"hypothesis={row['hypothesis']}  confidence={row.get('confidence')}  status={row['status']}  tier={row.get('tier') or 'A'}  priority={row.get('priority')}",
         f"span={_stamp(row.get('window_start'))} to {_stamp(row.get('window_end'))}",
     ]
     if row.get("review_verdict") is not None:
@@ -183,8 +188,14 @@ def format_show(row: dict[str, Any]) -> str:
         window_summary(evidence, row["flagged_at"]),
         "",
         "stored report:",
-        row.get("report_text") or _report_hint(row),
+        row.get("report_text") or _report_state(row, False),
     ]
+    challenge = _as_json(row.get("challenge"))
+    if challenge:
+        lines[4:4] = [f"challenger: benign_likelihood={challenge.get('benign_likelihood')}  {challenge.get('argument')}"]
+    verification = _as_json(row.get("report_verification"))
+    if verification and verification.get("verdict") == "fail":
+        lines += ["", f"report verification FAILED: {'; '.join(verification.get('issues') or [])}"]
     return "\n".join(lines)
 
 
@@ -206,11 +217,15 @@ async def _report(connection: Any, args: argparse.Namespace) -> int:
         return 1
     from groq import AsyncGroq
 
-    result = await generate_report(connection, args.incident_id, AsyncGroq(max_retries=0), force=args.force)
+    client = AsyncGroq(max_retries=0)
+    model = os.environ.get("GHAST_AGENT_MODEL") or os.environ.get("GHAST_REPORT_MODEL") or "openai/gpt-oss-120b"
+    result = await generate_report(
+        connection, args.incident_id, client, force=args.force, verifier_client=client, verifier_model=model,
+    )
     if result.outcome == "not_found":
         print(f"no incident {args.incident_id}", file=sys.stderr)
         return 1
-    if result.outcome in ("not_eligible", "failed"):
+    if result.outcome == "failed":
         print(f"{result.outcome}: {result.detail}", file=sys.stderr)
         return 1
     if result.outcome == "already_drafted":
@@ -234,6 +249,14 @@ async def _run(args: argparse.Namespace) -> int:
                 return 1
             print(format_show(row))
             return 0
+        if args.command == "delete-report":
+            from report_generator.on_demand import delete_report
+
+            if await delete_report(connection, args.incident_id):
+                print(f"deleted the report for {args.incident_id}; the incident and its evidence are kept")
+                return 0
+            print(f"no stored report for {args.incident_id}", file=sys.stderr)
+            return 1
         if args.command == "report":
             return await _report(connection, args)
         outcome = await record_verdict(connection, args.incident_id, args.verdict, args.reviewer, args.notes, args.force)
@@ -253,7 +276,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dsn", default=os.environ.get("POSTGRES_DSN"), help="Defaults to $POSTGRES_DSN.")
     commands = parser.add_subparsers(dest="command", required=True)
-    list_parser = commands.add_parser("list", help="Unreviewed incidents, newest first.")
+    list_parser = commands.add_parser("list", help="Unreviewed incidents: tier B first, then triage priority, then newest.")
     list_parser.add_argument("--limit", type=int, default=25)
     show_parser = commands.add_parser("show", help="Evidence and the 20-report summary for one incident.")
     show_parser.add_argument("incident_id", type=_valid_id)
@@ -266,6 +289,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     report_parser = commands.add_parser("report", help="Draft an LLM report for one incident on request.")
     report_parser.add_argument("incident_id", type=_valid_id)
     report_parser.add_argument("--force", action="store_true", help="Draft again even if a report is stored.")
+    delete_parser = commands.add_parser("delete-report", help="Delete a stored report (the incident is kept).")
+    delete_parser.add_argument("incident_id", type=_valid_id)
     args = parser.parse_args(argv)
     if not args.dsn:
         parser.error("--dsn is required (or set POSTGRES_DSN)")

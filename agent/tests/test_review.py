@@ -52,11 +52,11 @@ class FakeDb:
 
 
 @pytest.mark.asyncio
-async def test_list_asks_only_for_unreviewed_newest_first() -> None:
+async def test_list_asks_only_for_unreviewed_tier_b_first_then_priority_then_newest() -> None:
     db = FakeDb(rows=[incident_row()])
     rows = await list_unreviewed(db, limit=5)
     assert db.calls == [(LIST_QUERY, (5,))]
-    assert "review_verdict IS NULL" in LIST_QUERY and "ORDER BY flagged_at DESC" in LIST_QUERY
+    assert "review_verdict IS NULL" in LIST_QUERY and "ORDER BY tier DESC, priority DESC NULLS LAST, flagged_at DESC" in LIST_QUERY
     assert rows[0]["id"] == INCIDENT_ID
 
 
@@ -68,18 +68,39 @@ def test_list_output_shows_hypothesis_confidence_votes_span_and_report_pointer()
         assert expected in text
 
 
-def test_list_says_whether_a_report_can_be_drafted() -> None:
-    drafted = format_list([incident_row(has_report=False, confidence=0.85)])
-    assert f"can be drafted (python review.py report {INCIDENT_ID})" in drafted
-    below = format_list([incident_row(has_report=False, confidence=0.72)])
-    assert "none (below the report threshold)" in below
+def test_list_says_what_state_the_report_is_in() -> None:
+    assert "stored" in format_list([incident_row(has_report=True)])
+    assert f"none yet (draft one: python review.py report {INCIDENT_ID})" in format_list([incident_row(has_report=False)])
+    expired = format_list([incident_row(has_report=False, report_delete_reason="expired")])
+    deleted = format_list([incident_row(has_report=False, report_delete_reason="analyst")])
+    assert "expired after 24h" in expired and "deleted by an analyst" in deleted
 
 
-def test_show_hints_how_to_get_a_report_only_when_one_can_be_drafted() -> None:
-    eligible = format_show(incident_row(report_text=None, confidence=0.85))
-    assert f"none yet (draft one with: python review.py report {INCIDENT_ID})" in eligible
-    below = format_show(incident_row(report_text=None, confidence=0.72))
-    assert "confidence is below the 0.8 needed" in below
+def test_every_incident_can_get_a_report_whatever_its_confidence() -> None:
+    low = format_list([incident_row(has_report=False, confidence=0.4)])
+    assert "can be drafted" not in low and f"python review.py report {INCIDENT_ID}" in low
+
+
+def test_list_shows_tier_and_priority() -> None:
+    text = format_list([incident_row(tier="B", priority=0.91)])
+    assert text.startswith("[B] priority=0.91 ")
+    assert format_list([incident_row()]).startswith("[A] ")
+
+
+def test_show_prints_the_challenger_and_a_failed_verification() -> None:
+    row = incident_row(challenge=json.dumps({"benign_likelihood": 0.6, "argument": "vessel was at anchor"}),
+                       report_verification=json.dumps({"verdict": "fail", "issues": ["wrong MMSI"]}))
+    text = format_show(row)
+    assert "challenger: benign_likelihood=0.6" in text and "report verification FAILED: wrong MMSI" in text
+
+
+def test_show_says_when_a_report_expired() -> None:
+    assert "expired after 24h" in format_show(incident_row(report_text=None, report_delete_reason="expired"))
+
+
+def test_delete_report_command_parses() -> None:
+    with pytest.raises(SystemExit):
+        main(["--dsn", "postgresql://x", "delete-report", "not-a-uuid"])
 
 
 def test_report_command_parses() -> None:
