@@ -1,0 +1,19 @@
+name: ml-clustering-tests
+on:
+  push:
+    branches: [main]
+    paths: ["ml/models/clustering/**", ".github/workflows/ml-clustering-tests.yml"]
+  pull_request:
+    paths: ["ml/models/clustering/**", ".github/workflows/ml-clustering-tests.yml"]
+defaults:
+  run:
+    working-directory: ml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install numpy pytest
+      - run: pytest models/clustering/tests -v
