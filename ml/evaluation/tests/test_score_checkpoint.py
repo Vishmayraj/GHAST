@@ -4,6 +4,7 @@ flag rates, calibration by alert budget), not that any trained checkpoint is goo
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime, timedelta, timezone
 
 import numpy as np
@@ -147,3 +148,17 @@ def test_build_report_rejects_empty_input():
     from evaluation.score_checkpoint import ReportScores
     with pytest.raises(ValueError):
         build_report(ReportScores(empty, empty, empty, empty, empty.astype(bool), 0), 0.1)
+
+
+def test_quality_gate_leaves_out_unscorable_reports_and_counts_them(tiny_model, windows):
+    """Needs torch (tiny_model); not run in the environment this was written in."""
+    bad = windows[0]
+    positions = bad.positions.copy()
+    positions[5] = (91.0, 181.0)  # AIS "not available" sentinel
+    gated = dataclasses.replace(bad, positions=positions)
+    scores = score_windows(tiny_model, [gated])
+    assert scores.n_reports == WINDOW_LENGTH - 1 - 2 and scores.skipped == {"invalid_coordinate": 2}
+    for array in (scores.sog, scores.implied_speed, scores.speed_change, scores.underway):
+        assert array.shape == scores.errors.shape
+    ungated = score_windows(tiny_model, [gated], quality_gate=False)
+    assert ungated.n_reports == WINDOW_LENGTH - 1 and ungated.skipped == {}

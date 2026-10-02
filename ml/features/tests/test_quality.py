@@ -5,7 +5,7 @@ import pytest
 
 from features.quality import (
     MAX_SCOREABLE_GAP_SECONDS, REASON_ANTIMERIDIAN, REASON_INVALID_COORDINATE, REASON_LONG_GAP,
-    REASON_NON_POSITIVE_DT, count_reasons, transition_reasons, valid_coordinate,
+    REASON_NON_POSITIVE_DT, count_reasons, scoreable_mask, transition_reasons, valid_coordinate,
 )
 
 T0 = datetime(2026, 9, 30, tzinfo=timezone.utc)
@@ -62,3 +62,17 @@ def test_count_reasons_ignores_clean_reports():
 def test_length_mismatch_is_an_error():
     with pytest.raises(ValueError):
         transition_reasons(np.zeros((3, 2)), times(0, 1))
+
+
+def test_scoreable_mask_aligns_with_reports_one_to_n_minus_one():
+    positions = np.array([[10.0, 20.0], [10.001, 20.0], [91.0, 181.0], [10.003, 20.0], [10.004, 20.0]])
+    keep, left_out = scoreable_mask(positions, times(0, 30, 60, 90, 120))
+    assert keep.tolist() == [True, False, False, True]  # reports 1..4; the sentinel taints the step in and the step out
+    assert left_out == [REASON_INVALID_COORDINATE, REASON_INVALID_COORDINATE]
+    assert len(keep) == len(positions) - 1
+
+
+def test_scoreable_mask_keeps_everything_on_clean_data():
+    positions = np.cumsum(np.full((20, 2), 0.001), axis=0) + (10.0, 20.0)
+    keep, left_out = scoreable_mask(positions, times(*range(0, 1200, 60)))
+    assert keep.all() and keep.size == 19 and left_out == []

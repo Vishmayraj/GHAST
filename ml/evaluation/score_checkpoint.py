@@ -39,7 +39,7 @@ import asyncio
 import json
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -50,6 +50,7 @@ from features.extract import (
     FREEZE_DISPLACEMENT_EPSILON_KNOTS, IMPLIED_SPEED_INDEX, MISSING_VALUE, N_FEATURES, SOG_INDEX,
 )
 from features.pipeline import FeatureWindow, TrainingDataSource, stream_feature_windows
+from features.quality import count_reasons, scoreable_mask
 from models.bilstm.infer import prediction_errors_batch
 from models.bilstm.model import BiLSTMNextDelta
 from models.bilstm.threshold import OPERATING_THRESHOLD
@@ -86,6 +87,9 @@ class ReportScores:
     speed_change: np.ndarray      # |SOG - previous SOG|, NaN if either is missing
     underway: np.ndarray          # bool, window-level: any report implies more than UNDERWAY_KNOTS
     n_windows: int
+    # Reports left out by the data-quality gate (features/quality.py), by reason. Empty when the
+    # gate is off. These are counted, never silently dropped.
+    skipped: dict[str, int] = field(default_factory=dict)
 
     @property
     def n_reports(self) -> int:
@@ -98,23 +102,36 @@ def _nan_missing(values: np.ndarray) -> np.ndarray:
     return values
 
 
-def score_windows(model: BiLSTMNextDelta, windows: list[FeatureWindow]) -> ReportScores:
-    """Run the model on real windows and flatten to per-report arrays. No labels, no injection."""
+def score_windows(model: BiLSTMNextDelta, windows: list[FeatureWindow], quality_gate: bool = True) -> ReportScores:
+    """Run the model on real windows and flatten to per-report arrays. No labels, no injection.
+
+    With `quality_gate` (the default) reports whose step the model cannot fairly be asked to
+    predict (sentinel coordinates, long silences, bad time steps, antimeridian crossings) are
+    left out and counted, exactly as the live scorer does. Pass False to reproduce numbers from
+    before the gate existed.
+    """
     errors_per_window = prediction_errors_batch(model, windows)
     errors, sog, implied, change, underway = [], [], [], [], []
+    skipped: list[str] = []
     for window, window_errors in zip(windows, errors_per_window, strict=True):
         features = window.features
         window_sog = _nan_missing(features[:, SOG_INDEX])
         window_implied = _nan_missing(features[:, IMPLIED_SPEED_INDEX])
-        errors.append(np.asarray(window_errors, dtype=np.float64)[1:])
-        sog.append(window_sog[1:])
-        implied.append(window_implied[1:])
-        change.append(np.abs(window_sog[1:] - window_sog[:-1]))
+        keep = np.ones(len(window_sog) - 1, dtype=bool)
+        if quality_gate:
+            keep, left_out = scoreable_mask(window.positions, window.timestamps)
+            skipped.extend(left_out)
+        # The moving/stationary label is a property of the whole window, so it is taken before
+        # any report is filtered out.
         moving = bool(np.nanmax(window_implied, initial=0.0) > UNDERWAY_KNOTS)
-        underway.append(np.full(len(window_sog) - 1, moving))
+        errors.append(np.asarray(window_errors, dtype=np.float64)[1:][keep])
+        sog.append(window_sog[1:][keep])
+        implied.append(window_implied[1:][keep])
+        change.append(np.abs(window_sog[1:] - window_sog[:-1])[keep])
+        underway.append(np.full(int(keep.sum()), moving))
     return ReportScores(
         np.concatenate(errors), np.concatenate(sog), np.concatenate(implied),
-        np.concatenate(change), np.concatenate(underway), len(windows),
+        np.concatenate(change), np.concatenate(underway), len(windows), count_reasons(skipped),
     )
 
 
@@ -123,6 +140,7 @@ def merge_scores(parts: list[ReportScores]) -> ReportScores:
         np.concatenate([p.errors for p in parts]), np.concatenate([p.sog for p in parts]),
         np.concatenate([p.implied_speed for p in parts]), np.concatenate([p.speed_change for p in parts]),
         np.concatenate([p.underway for p in parts]), sum(p.n_windows for p in parts),
+        {reason: sum(p.skipped.get(reason, 0) for p in parts) for reason in {r for p in parts for r in p.skipped}},
     )
 
 
@@ -183,6 +201,7 @@ def build_report(
     return {
         "windows": scores.n_windows,
         "reports": scores.n_reports,
+        "skipped_by_quality_gate": dict(scores.skipped),
         "error_percentiles": {f"p{p:g}": float(np.percentile(scores.errors, p)) for p in ERROR_PERCENTILES},
         "operating_threshold": operating_threshold,
         "flag_rate_at_operating_threshold": votes.get("prediction_error"),
@@ -197,6 +216,10 @@ def build_report(
 
 def print_report(report: dict) -> None:
     print(f"\nscored {report['reports']:,} reports in {report['windows']:,} windows")
+    skipped = report.get("skipped_by_quality_gate") or {}
+    if skipped:
+        total = sum(skipped.values())
+        print(f"left out by the data-quality gate: {total:,} reports ({total / (total + report['reports']):.2%}): " + ", ".join(f"{k}={v:,}" for k, v in sorted(skipped.items())))
     print("prediction error percentiles (degrees):")
     for name, value in report["error_percentiles"].items():
         print(f"  {name:<6} {value:.6f}")
@@ -253,6 +276,7 @@ async def run(
     out_path: Path | None = None,
     freeze_threshold: float = DEFAULT_FREEZE_REPLAY_THRESHOLD,
     speed_jump_threshold: float | None = None,
+    quality_gate: bool = True,
 ) -> int:
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
@@ -271,7 +295,7 @@ async def run(
     def _score_batch() -> None:
         if not batch:
             return
-        parts.append(score_windows(model, batch))
+        parts.append(score_windows(model, batch, quality_gate))
         if len(parts) == 1 or len(parts) % PROFILE_EVERY_BATCHES == 0:
             print(f"scored batch={len(parts):,} windows={seen_windows:,}", flush=True)
         batch.clear()
@@ -319,12 +343,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--freeze-replay-threshold", type=float, default=DEFAULT_FREEZE_REPLAY_THRESHOLD)
     parser.add_argument("--speed-jump-threshold", type=float, default=None, help="Off unless given, like the live scorer.")
     parser.add_argument("--out", type=Path, help="Write the report as JSON here.")
+    parser.add_argument("--no-quality-gate", action="store_true", help="Score every report, including sentinel coordinates, long gaps and antimeridian jumps (the behaviour before features/quality.py). Use it to reproduce older reports.")
     parser.add_argument("--no-mlflow", action="store_true", help="Skip MLflow logging.")
     args = parser.parse_args(argv)
     return asyncio.run(run(
         args.dsn, Path(args.checkpoint), datetime.fromisoformat(args.eval_start), datetime.fromisoformat(args.eval_end),
         args.device, args.no_mlflow, args.source, args.batch_size, args.include_training_vessels, args.max_windows,
-        args.out, args.freeze_replay_threshold, args.speed_jump_threshold,
+        args.out, args.freeze_replay_threshold, args.speed_jump_threshold, not args.no_quality_gate,
     ))
 
 

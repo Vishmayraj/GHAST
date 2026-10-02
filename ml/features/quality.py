@@ -81,3 +81,19 @@ def count_reasons(reasons: Sequence[str | None]) -> dict[str, int]:
         if reason is not None:
             counts[reason] = counts.get(reason, 0) + 1
     return counts
+
+
+def scoreable_mask(
+    positions: np.ndarray,
+    timestamps: Sequence[datetime],
+    max_gap_seconds: float = MAX_SCOREABLE_GAP_SECONDS,
+) -> tuple[np.ndarray, list[str]]:
+    """For reports 1..n-1 of a window: which can be scored, and the reasons for those that cannot.
+
+    Returns (keep, skipped_reasons): `keep` is a bool array of length n-1 aligned with the
+    scorers' per-report arrays (report 0 has no step into it and is never in them), and
+    `skipped_reasons` holds one reason per report that was left out.
+    """
+    reasons = transition_reasons(positions, timestamps, max_gap_seconds)[1:]
+    keep = np.array([reason is None for reason in reasons], dtype=bool)
+    return keep, [reason for reason in reasons if reason is not None]
