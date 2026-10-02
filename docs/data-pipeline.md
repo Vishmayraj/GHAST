@@ -168,7 +168,7 @@ The `ALTER TABLE ... DROP CONSTRAINT / ADD CONSTRAINT` block exists because `fre
 
 ### `jamming_zones`
 
-`id`, `name`, `zone GEOGRAPHY(MULTIPOLYGON, 4326)`, `source` (`manual` or `automated`), `confidence`, `active`, `first_seen`, `last_seen`, `notes`, timestamps; GiST index on `zone`, index on `active`. Nothing in the repository inserts into this table. `data/jamming_zones/` holds a README and no data. The agent's `jamming_zones` tool therefore returns `matched: false` on a fresh database, and the `jamming` hypothesis cannot fire until rows are inserted by hand.
+`id`, `name`, `zone GEOGRAPHY(MULTIPOLYGON, 4326)`, `source` (`manual` or `automated`), `confidence`, `active`, `first_seen`, `last_seen`, `notes`, `source_name`, `source_url`, `source_date` (provenance, written by the loader), timestamps; a unique index on `(name, source_url)`; GiST index on `zone`, index on `active`. Nothing in the repository inserts into this table. `data/jamming_zones/` holds a README and no data. The agent's `jamming_zones` tool therefore returns `matched: false` on a fresh database, and the `jamming` hypothesis cannot fire until rows are inserted by hand.
 
 ## Preprocessing that happens after the tables
 
@@ -183,7 +183,7 @@ The pipeline does not normalize data inside the database. Feature extraction and
 | raw archive read-back / replay | not implemented |
 | historical importer | implemented, used for the April 2026 backfill; no tests, not idempotent |
 | schema | implemented; no migrations |
-| `jamming_zones` data | table exists, no data source, no loader |
+| `jamming_zones` data | table exists; `scripts/load_jamming_zones.py` loads a curated GeoJSON file (tested with fakes, never run against a database); no zone file has been curated yet |
 | `vessel_static` for historical vessels | not populated by the importer |
 
 Known limitations, all read from code and not measured:

@@ -56,7 +56,7 @@ Behavior worth knowing:
 - `track_history` reads all sources but only up to and including `flagged_at`, so evidence and the LLM report's "last position" cannot describe times after the flag. `positions` is the recent trajectory (24 hours back by default). The scorer does not ask for the `after` slice, so nothing currently reads it.
 - Freeze corroboration runs on the last 20 reports of `positions`, the same window length the detectors scored. Because `positions` ends at the flagged report, this window ends at the flag, while the scored window ends at the newest report in it; the two can differ by the reports after the flag inside the scored window.
 - `incident_history` keeps "this vessel has been here before" (`same_vessel`, matches `mmsi`) apart from "this pattern has been seen elsewhere" (`same_pattern_elsewhere`, matches `anomaly_type` on other vessels). `anomaly_type` is the sorted vote names joined with `+` (`prediction_error`, `freeze_replay+prediction_error`, ...). Both include incidents of any status and any age. Only `same_vessel` feeds a hypothesis rule; `same_pattern_elsewhere` is recorded in evidence for the analyst and the report.
-- `jamming_zones` has no data source in the repo, so on a database where nobody inserted zones, `matched` is always false.
+- `jamming_zones` stays empty until someone curates a file and runs `scripts/load_jamming_zones.py` (format in `data/jamming_zones/README.md`). No file is committed, so on a database where nobody loaded zones, `matched` is always false.
 
 ## Hypothesis rules (`form_hypothesis`)
 
@@ -182,6 +182,6 @@ python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAM
 | analyst review (`agent/review.py`, `scoring/review_stats.py`) | implemented, unit tested with fakes; no incident has been reviewed yet |
 | `resolved` status | set only by a recorded verdict |
 | dashboard or API reading incidents | not implemented (`docs/backend-and-frontend.md`) |
-| `jamming_zones` data | none |
+| `jamming_zones` data | loader written, no curated file |
 
 Documentation that is out of date relative to this code: `agent/README.md` (three tools; says a valid run has "exactly three" audit entries, it now has four when the classifier tool is registered), `agent/orchestrator/README.md` (LangGraph).
