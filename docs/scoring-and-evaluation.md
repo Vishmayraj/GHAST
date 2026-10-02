@@ -176,9 +176,9 @@ With no reviewed incidents it prints `no reviewed incidents`. Under 30 reviewed 
 | Piece | State |
 |---|---|
 | `score_checkpoint.py` | implemented, ran at scale elsewhere; unit tested at the function level, not end to end |
-| threshold `OPERATING_THRESHOLD` | placeholder from the removed synthetic evaluation; re-derive by flag rate from real traffic |
+| threshold `OPERATING_THRESHOLD` | placeholder from the removed synthetic evaluation; flags 33% to 39% of real reports (`docs/research_notes/threshold-recalibration.md`); live alert thresholds come from `threshold_config` |
 | `freeze_replay_detector` evaluation | experimental; only its live vote rate is measurable, on real traffic |
-| live-data evaluation | not done |
+| live-data evaluation | historical and live reports committed in `ml/reports/`; the live one predates the data-quality gate and has to be re-run |
 | review statistics (`review_stats.py`) | implemented, unit tested with fakes; prints `no reviewed incidents` until analysts record verdicts |
 | `live_scorer.py` | implemented, tested with fakes; a live run producing a persisted incident is recorded in `ghast_latest_report.md` (see `docs/agent.md`) |
 | threshold calibration for live | not done |

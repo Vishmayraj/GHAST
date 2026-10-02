@@ -16,11 +16,14 @@ Provenance (fill in and update this block every time OPERATING_THRESHOLD changes
                            was measured on the same data it was tuned on.
     f1 at that time:       0.424 (speed_jump baseline 0.224); precision and recall were
                            not recorded
-    status:                PLACEHOLDER UNTIL RE-DERIVED. Replace it with a threshold chosen
-                           by alert budget on real traffic:
-                           `python -m evaluation.score_checkpoint` prints the threshold
-                           that gives a target flag rate, per source (historical and live).
-                           See ImplementationPlans/01_Trust_Pass.md.
+    status:                PLACEHOLDER UNTIL RE-DERIVED. Real-traffic reports now exist
+                           (ml/reports/historical_epoch_010.json, live_epoch_010.json) and
+                           show this value flags 33.4% (historical) and 39.3% (live) of
+                           reports, so it is not an alert budget. No replacement chosen:
+                           the live report predates the data-quality gate and its tail is
+                           not usable, and the alert budget is an owner decision. See
+                           docs/research_notes/threshold-recalibration.md. Live alert
+                           thresholds come from threshold_config, not from this constant.
     run provenance:        executed on another machine; no MLflow run id or result file is
                            in the repository, so none of the above can be reproduced here.
 
