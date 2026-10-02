@@ -1,3 +1,9 @@
 # backend/api/
 
-FastAPI app. Stage 1 endpoints: real-time scoring, the incident feed, and the data the dashboard renders (map, incident list, vessel drill-down).
+FastAPI app. Run it from this directory:
+
+```
+GHAST_API_KEY=... POSTGRES_DSN=postgresql://ghast:ghast@localhost:5432/ghast uvicorn main:create_app --factory --port 8000
+```
+
+Optional: `GHAST_CORS_ORIGINS` (comma separated) when the site is on a different origin. Routes and response shapes are in `docs/backend-and-frontend.md`.

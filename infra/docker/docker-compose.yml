@@ -3,8 +3,9 @@
 # Brings up TimescaleDB (Postgres + PostGIS + TimescaleDB, for spatio-temporal
 # vessel-track storage), MinIO (S3-compatible object storage, for the raw AIS
 # archive), the ingestion service (AIS Stream -> normalize -> TimescaleDB), and the
-# scoring service (live BiLSTM + detector scoring -> agent -> incidents).
-# Remaining application services (ml training, backend, frontend) get their
+# scoring service (live BiLSTM + detector scoring -> agent -> incidents), the backend API
+# over incidents, and the static frontend that proxies /api/ to it.
+# Remaining application services (ml training) get their
 # own service blocks added here as each one lands - see infra/docker/README.md.
 #
 # Usage: docker compose -f infra/docker/docker-compose.yml up -d
@@ -86,6 +87,22 @@ services:
       - ../../ml/checkpoints:/checkpoints:ro
       - ../../ml/laya_model:/laya_model:ro
 
+  backend:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+    container_name: ghast-backend
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      GHAST_API_KEY: ${GHAST_API_KEY:?set GHAST_API_KEY in infra/docker/.env}
+      POSTGRES_DSN: postgresql://${POSTGRES_USER:-ghast}:${POSTGRES_PASSWORD:-ghast}@timescaledb:5432/${POSTGRES_DB:-ghast}
+      # Only needed when the site is served from a different origin than the API.
+      GHAST_CORS_ORIGINS: ${GHAST_CORS_ORIGINS:-}
+
   frontend:
     build:
       context: ../..
@@ -94,8 +111,11 @@ services:
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-3000}:80"
+    environment:
+      # nginx adds this header on /api/ requests (frontend/nginx/default.conf.template).
+      GHAST_API_KEY: ${GHAST_API_KEY:?set GHAST_API_KEY in infra/docker/.env}
     depends_on:
-      - ingestion
+      - backend
 
 volumes:
   timescaledb_data:

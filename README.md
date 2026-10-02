@@ -13,7 +13,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Brings up TimescaleDB, MinIO, ingestion, scoring and the static frontend. Ingestion needs `AISSTREAM_API_KEY` in `.env`, and scoring needs `ml/checkpoints/epoch_010.pt` (not in the repo). See `infra/docker/README.md` for details, and for how to add a new service as one lands.
+Brings up TimescaleDB, MinIO, ingestion, scoring, the backend API and the static frontend (which proxies `/api/` to the backend). Set `GHAST_API_KEY` in `.env` first. Ingestion needs `AISSTREAM_API_KEY` in `.env`, and scoring needs `ml/checkpoints/epoch_010.pt` (not in the repo). See `infra/docker/README.md` for details, and for how to add a new service as one lands.
 
 ## Layout
 
@@ -24,8 +24,8 @@ Brings up TimescaleDB, MinIO, ingestion, scoring and the static frontend. Ingest
 | `ingestion/` | AIS feed collector + AIVDM/NMEA normalizer |
 | `ml/` | Feature extraction, Bi-LSTM model, training, evaluation |
 | `agent/` | Investigation agent: orchestrator, tools, report generator |
-| `backend/` | DB schema (`models/schema.sql`); the FastAPI app is not written yet |
-| `frontend/` | `site/` (public landing site) + `dashboard/` (React analyst dashboard, not started) |
+| `backend/` | DB schema (`models/schema.sql`) and the FastAPI app over `incidents` (`api/`) |
+| `frontend/` | `site/`: the public site and the analyst console, plain HTML and JS |
 | `infra/` | Docker (local dev) and CI |
 | `docs/` | Research notes (design doc itself stays in `HLD/`) |
 | `notebooks/` | Exploration notebooks |

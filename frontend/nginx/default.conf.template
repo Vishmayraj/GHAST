@@ -1,0 +1,19 @@
+# Rendered by the nginx image at start (only GHAST_* variables are substituted).
+# The static site and the API share one origin: /api/ goes to the backend with the key added
+# here, so no key sits in config.js. Anyone who can reach this port can use the API, review
+# endpoint included. That is the same exposure as a key in the page, and it is a Stage 1 stopgap.
+server {
+    listen 80;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://backend:8000/;
+        proxy_set_header X-API-Key ${GHAST_API_KEY};
+        proxy_set_header Host $host;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}

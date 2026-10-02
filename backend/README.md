@@ -1,8 +1,9 @@
 # backend/
 
-The API side of the delivery layer: exposes the scoring results, incident feed, and dashboard data.
+The API over the `incidents` table, and the database schema.
 
-- `api/` — FastAPI app: scoring endpoint, incident feed, dashboard data.
-- `models/` — DB schema and ORM models.
+- `api/` - FastAPI app (`main.py`, `models.py`, `shaping.py`). Endpoint list and what it leaves out: `docs/backend-and-frontend.md`.
+- `models/` - `schema.sql` (applied by `ingestion/storage.py`) and `api_role.sql` (manual, creates the API's database role).
+- `tests/` - API tests with a fake pool. `cd backend && pytest tests`.
 
-Stage 1 stays unauthenticated/single-tenant; OAuth2/JWT and per-customer API keys are a Stage 3 item (MIP section 8.4) once there's a real pilot customer.
+Stage 1 auth is one API key from `GHAST_API_KEY`. OAuth2/JWT and per-customer keys are a Stage 3 item (MIP section 8.4).

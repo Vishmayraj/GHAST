@@ -1,6 +1,6 @@
 # Tests
 
-Map of the test suite as it exists. Nothing was executed while writing this document. The counts below come from counting `def test_` definitions (there is no `parametrize` anywhere), so they are static counts, not pass counts. A `pytest` run may report a different number if collection changes them, and nothing here says the suite is green.
+Map of the test suite as it exists. Nothing was executed while writing this document. The counts below come from counting `def test_` definitions (`parametrize` appears only in `ml/evaluation` and `backend/tests`), so they are static counts, not pass counts. A `pytest` run may report a different number if collection changes them, and nothing here says the suite is green.
 
 ## Counts and layout
 
@@ -13,9 +13,10 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 37 | `ml/` |
 | `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report`, `test_agent_runtime`, `test_threshold_agent`, `test_incident_agents`, `test_incident_pipeline` | 146 | `agent/` |
 | `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py`, `test_thresholds_cli.py` | 37 | `scoring/` |
-| total | 30 files | 281 | |
+| `backend/tests` | `test_api.py` | 22 (29 cases, one test is parametrized over 8 routes) | `backend/` |
+| total | 31 files | 303 | |
 
-The ML total is 90. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
+The ML total is 90. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `frontend/`, `scripts/`, or `infra/`.
 
 Each package has a `pytest.ini` with a `pythonpath` line so that bare `pytest` resolves the flat imports (`ml/pytest.ini`: `.`; `agent/pytest.ini`: `. ../ml`; `scoring/pytest.ini`: `. ../ml ../agent`). `ingestion/` has no `pytest.ini`; its tests import `normalizer.normalize` and work when run from `ingestion/`.
 
@@ -24,6 +25,7 @@ cd ingestion && pytest tests -v
 cd ml        && pytest features/tests training/tests models/bilstm/tests evaluation/tests -v
 cd agent     && pytest tests -v
 cd scoring   && pytest tests -v
+cd backend   && pytest tests -v
 ```
 
 ## What needs what
@@ -36,12 +38,13 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 | `ml/*` | `torch`, `numpy`, `asyncpg` (imported by `features.pipeline`), `pytest`. `requirements-dev.txt` also brings `mlflow`, `scikit-learn`, `pandas`, `psycopg`, `tqdm`, `psutil`; only `psutil` is imported by code under test (inside `score_checkpoint.run`, which is not tested). |
 | `agent/tests` | `numpy`, `asyncpg`, `pytest`, `pytest-asyncio`. No torch: `state_machine` imports only `models.bilstm.threshold`, which is a constant. |
 | `scoring/tests` | same as agent. `live_scorer` imports torch only inside `load_model_scorer`, which is not called. |
+| `backend/tests` | `fastapi`, `httpx`, `pytest`, `pydantic` (all in `backend/requirements-dev.txt`). `asyncpg` is imported only when the app builds its own pool, which the tests never do. |
 
 `ml/requirements.txt` says `torch>=2.2` with no index URL, so on Linux CI it pulls the default CUDA build. That works but is a large download for every ML workflow.
 
 ## CI
 
-`.github/workflows/` has seven workflows, each installing the matching `requirements-dev.txt` on Python 3.12 and running one test directory:
+`.github/workflows/` has eight workflows, each installing the matching `requirements-dev.txt` on Python 3.12 and running one test directory:
 
 | Workflow | Runs | Triggers on changes to |
 |---|---|---|
@@ -51,6 +54,7 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 | `ml-model-tests` | `ml/models/bilstm/tests` | `ml/models/bilstm/**`, `ml/training/**`, `ml/features/**` |
 | `ml-evaluation-tests` | `ml/evaluation/tests` | `ml/evaluation/**`, `ml/features/**`, `ml/models/bilstm/**` |
 | `agent-tests` | `agent/tests` | `agent/**`, `ml/requirements*.txt` |
+| `backend-tests` | `backend/tests` | `backend/**`, `scoring/review_stats.py` |
 | `scoring-tests` | `scoring/tests` | `scoring/**`, `agent/**`, `ml/features/**`, `ml/evaluation/**`, `ml/models/bilstm/threshold.py` |
 
 Gaps in the path filters, from the lists themselves: a change to `ml/features/**` does not run `agent-tests`, although `agent` imports `features.extract` and `features.summary`. A change to `ml/training/**` does not run `ml-evaluation-tests`, although `score_checkpoint` imports `training.dataset_cache`. `ml-model-tests` uses `ml/training/**`, so it covers that import for the model test only.
