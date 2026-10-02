@@ -119,10 +119,12 @@ Jamming can report at 0.85 confidence; freeze/replay corroboration at 0.8;
 a single detector caps other non-benign hypotheses at 0.5. Below-threshold is
 benign only when no other detector voted.
 
-Reports are the only LLM call, and they are drafted only on request: the scorer never
-calls Groq. `python review.py report <incident-id>` (from agent/, with GROQ_API_KEY set)
-drafts one for an incident at or above REPORT_DRAFT_CONFIDENCE_THRESHOLD, using
-report_generator/report.py with openai/gpt-oss-120b by default. Set GHAST_REPORT_MODEL to
+Scoring never calls an LLM. After an incident is stored, the fleet-context, challenger and
+triage agents run on it (agents/pipeline.py), and a report is drafted automatically for
+tier B incidents (score at or above threshold B). Tier A reports are drafted on request:
+`python review.py report <incident-id>` (from agent/, with GROQ_API_KEY set). Both use
+report_generator/report.py with openai/gpt-oss-120b by default, and every draft is checked
+by the report verifier. Without GROQ_API_KEY the agents use deterministic baselines. Set GHAST_REPORT_MODEL to
 select a Groq model and GHAST_REPORT_MAX_TOKENS to change the 1200-token default.
 
 ## Laya pattern classifier (optional)

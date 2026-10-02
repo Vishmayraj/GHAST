@@ -108,24 +108,45 @@ The minimum keeps one bad SOG at rest (a single frozen pair) from matching. 3 is
 
 ## Report generation
 
-Reports are never drafted during scoring or investigation, so no tokens and no report storage are spent on incidents nobody opens. `agent/report_generator/on_demand.py::generate_report(db, incident_id, client, force=False)` is the one place a report is written. It:
+Nothing is drafted while the scorer runs. A report is drafted when an incident is **tier B** (its score is at or above threshold B, so `agents.pipeline` drafts it right after the incident is stored) or when an analyst asks for one on a **tier A** incident (the console's "generate report" button; today `python review.py report <id>`). Confidence does not gate this any more: the old `REPORT_DRAFT_CONFIDENCE_THRESHOLD` is gone.
+
+`agent/report_generator/on_demand.py::generate_report(db, incident_id, client, force=False, auto=False, verifier_client=None, verifier_model=None)` is the one place a report is written. It:
 
 1. loads the stored incident (not found: `not_found`),
 2. returns the stored text if there is one (`already_drafted`, no model call) unless `force` is set,
-3. refuses unless `confidence >= REPORT_DRAFT_CONFIDENCE_THRESHOLD` (`not_eligible`, no model call),
-4. calls `draft_report(incident, client)`; an exception or empty text gives `failed` and stores nothing,
-5. stores `report_text` and `report_generated_at`, only while `report_text` is still NULL unless `force` (a concurrent loser gets the winner's text back as `already_drafted`).
+3. drafts with `draft_report(incident, client)`; an exception or empty text gives `failed` and stores nothing,
+4. runs the **report verifier agent** on the draft (below). A failing draft is redrafted once with the verifier's issues as feedback. If it still fails it is stored with a visible `> WARNING: this draft did not pass verification` line at the top, and `report_verification` says why,
+5. stores `report_text`, `report_generated_at`, `report_auto`, `report_expires_at` (now + 24 hours) and `report_verification`, only while `report_text` is still NULL unless `force` (a concurrent loser gets the winner's text back as `already_drafted`).
 
-`REPORT_DRAFT_CONFIDENCE_THRESHOLD` is 0.8 in `state_machine.py`, above the 0.7 reported/escalated line. With today's tiers that admits `jamming` (0.85) and a corroborated `freeze_replay` (0.8), and leaves `targeted_spoof` (0.72), `equipment_fault` (0.55) and `benign` (0.75) out. It is an uncalibrated placeholder. The callers are `python review.py report <id>` (the stand-in for a dashboard button) and, later, a backend endpoint (`ImplementationPlans/02_Delivery_Layer.md`).
+**Lifecycle.** A report lives 24 hours. `purge_expired_reports` (run every 15 minutes by the scorer, `--retention-interval-seconds`) clears `report_text` after that and sets `report_delete_reason = 'expired'`. An analyst deleting one (`python review.py delete-report <id>`, later the console's delete button) sets it to `'analyst'`. Either way the incident, its evidence, its verdict and its score are kept forever: they are the data later training needs. A report can be generated again after it expired or was deleted. **Note for the frontend:** a deleted report must stay gone until someone asks for a new one; it is never regenerated automatically, tier B included.
 
-- Client: `groq.AsyncGroq(max_retries=0)`. Model: `GHAST_REPORT_MODEL`, default `openai/gpt-oss-120b`. Output cap: `GHAST_REPORT_MAX_TOKENS`, default 1200. (`docs/DEVELOPER_GUIDE.md` says 2000; the code and `agent/report_generator/README.md` say 1200.)
-- The prompt is fixed text (`REPORT_PROMPT_PREFIX`) followed by compact JSON: the decision fields plus a summary of evidence (position count, first and last position of `track_history`, and the full zone, history, freeze, detector and classifier results). Full track history is deliberately left out.
-- The prompt asks for a fixed markdown structure with a small mermaid diagram and at most three analyst actions. It tells the model not to invent facts. Nothing checks the output against the input. The analyst actions in `ghast_latest_report.md` (request more AIS, cross-check radar or VMS) are model-written suggestions, not agent output.
-- Reports are not used by any other code. The scoring service has no Groq dependency and does not read `GROQ_API_KEY`.
+- Client: `groq.AsyncGroq(max_retries=0)` for the CLI. Model: `GHAST_REPORT_MODEL`, default `openai/gpt-oss-120b`. Output cap: `GHAST_REPORT_MAX_TOKENS`, default 1200.
+- The prompt is fixed text (`REPORT_PROMPT_PREFIX`) followed by compact JSON: the decision fields, the tier, a summary of evidence, the fleet-context result and the challenger's argument. Full track history is deliberately left out.
+
+## Agents
+
+An agent here means something that chooses which tools to call and when it has seen enough, then commits to a decision, as opposed to a function with a fixed sequence. They all run on one small runtime, `agent/runtime/agent.py`:
+
+- the model calls read-only tools, then a required `finish` tool; code **validates** every decision (hard bounds) before anything acts on it, and a rejected decision goes back to the model once;
+- the loop is capped (6 tool rounds, 700 tokens per call);
+- with no `GROQ_API_KEY`, a provider error, a missing `finish`, or two rejected decisions, the agent's **deterministic baseline** decides from the same evidence and the run is marked `fallback`. A missing key degrades GHAST; it never stops it;
+- every run (task, each tool call and result, decision, mode) is stored in `agent_runs`.
+
+| Agent | Where | Decides | Cannot do |
+|---|---|---|---|
+| Threshold | `agent/threshold_agent` | Thresholds A and B for the current model version, from the live score distribution the scorer records (`scoring_stats`), offline `score_checkpoint` reports, incident volume and analyst verdicts. Runs on a schedule and right after a model change. | Move A more than 3x on the same model, put B under 1.5x A, leave 0.0001 to 10 degrees, retune on under 50,000 scored reports (unless it adopts a value from an offline report), or act on a change under 25 percent. |
+| Fleet context | `agents/fleet_context.py` | One vessel or an area: neighbours reporting near the flag (PostGIS) and incidents on other vessels there. Stored in `evidence.fleet_context`. | Call a vessel isolated with fewer than 3 neighbours, or an area with fewer than 2 nearby incidents. Counts come from the tools, not the model. |
+| Challenger | `agents/challenger.py` | The strongest honest benign argument and a `benign_likelihood`, stored in `incidents.challenge`. | Change the hypothesis or close anything. Triage can lower priority by it at most a quarter. |
+| Triage | `agents/triage.py` | `priority` 0 to 1 within a tier, from confidence, how far the score is between A and B, scope, the challenge and queue pressure. | Hide or close an incident. It sets order only. |
+| Report verifier | `agents/report_verifier.py` | Whether a drafted report agrees with the stored incident. | Pass a draft that fails the code-side checks (wrong MMSI, hypothesis, confidence, an invented status word, "confirmed spoofing" without an analyst verdict). |
+
+The threshold agent is an agent because the right thresholds depend on the model: every Laya fine-tune or BiLSTM retrain shifts the score scale. `scoring/live_scorer.py` re-reads `threshold_config` every cycle and compares the model version it loaded with the one the active thresholds were set for. `python scoring/thresholds.py show | history | retune | set` is the manual side. The alert budgets it aims for (`--budget-a`, `--budget-b`, defaults 1e-4 and 1e-5 of scoreable reports) are placeholders for the owner's decision.
+
+After an incident is stored, `agents/pipeline.py` runs fleet context and the challenger in parallel, then triage, then (tier B only) the report. Each step is isolated: one failing agent is logged and skipped. The incident is already stored before any of them run, and none of them can change `hypothesis` or `status`.
 
 ## Persistence
 
-`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, window_start, window_end`. `report_text` and `report_generated_at` stay NULL until a report is requested. Evidence and log are JSON with `default=str` for datetimes. `window_start` and `window_end` are the first and last report times of the scored window, carried on the `FlaggedAnomaly` by `scoring/live_scorer.py::evaluate_window`; they are NULL for callers that do not set them, and for incidents stored before this change. `updated_at` is left to its column default. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
+`persist_incident` inserts one row: `mmsi, flagged_at, flagged_position, anomaly_score, anomaly_type, hypothesis, confidence, status, evidence, tool_call_log, window_start, window_end, tier` and returns the new incident id. `tier` is `A` or `B`; `report_text`, `report_generated_at` and the report lifecycle columns stay NULL until a report is drafted; `priority` and `challenge` are filled by the agents above. Evidence and log are JSON with `default=str` for datetimes. `window_start` and `window_end` are the first and last report times of the scored window, carried on the `FlaggedAnomaly` by `scoring/live_scorer.py::evaluate_window`; they are NULL for callers that do not set them, and for incidents stored before this change. `updated_at` is left to its column default. The insert is one statement on a pool connection; the agent does not wrap the tool queries and the insert in a transaction.
 
 ## Analyst review
 
@@ -138,8 +159,9 @@ python review.py show <incident-id>
 python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAME] [--force]
 ```
 
-- `list`: incidents with `review_verdict IS NULL`, newest first, each with hypothesis, confidence, status, votes (`anomaly_type`), the scored window span, and whether a report is stored (with the `show` command to read it).
-- `report`: drafts the LLM report for one incident on request (`--force` drafts again), needs `GROQ_API_KEY`, and prints the text. Only incidents at or above `REPORT_DRAFT_CONFIDENCE_THRESHOLD` are eligible; `list` and `show` say whether one can be drafted.
+- `list`: incidents with `review_verdict IS NULL`, tier B first, then triage priority, then newest, each with its tier, priority, hypothesis, confidence, status, votes (`anomaly_type`), the scored window span, and the report state (stored, none yet, expired after 24h, or deleted by an analyst).
+- `report`: drafts the LLM report for any incident on request (`--force` drafts again), needs `GROQ_API_KEY`, verifies it, and prints the text.
+- `delete-report`: removes a stored report on purpose. The incident is kept.
 - `show`: the stored evidence (the raw position list collapsed to its count and first and last rows; `tool_call_log` is left out because it repeats the evidence), the 20-report summary text the Laya classifier reads, rebuilt from the stored `track_history` with `features.summary.summarize_rows`, and the stored report. If fewer than 20 reports are stored up to the flag it says so instead of summarizing.
 - `verdict`: one of `confirmed_spoof`, `jamming`, `equipment_fault`, `benign`, `unclear`. It sets `review_verdict`, `reviewed_by` (defaults to the OS user), `reviewed_at`, `review_notes`, and `status = 'resolved'`. An existing verdict is not replaced unless `--force` is given.
 
@@ -147,7 +169,7 @@ python review.py verdict <incident-id> <verdict> [--notes "..."] [--reviewer NAM
 
 ## Tests
 
-`agent/tests` (96 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling (including the hypothesis-to-label mapping) and failure isolation, freeze corroboration (minimum pairs, 20-report window), the weak-isolated-flag benign rule, window columns on the persisted row, report input compaction and error handling, tool queries against fake connections (`track_history` bounds and the opt-in `after` slice, the two `incident_history` queries), and the on-demand report gate (threshold, stored text reused, force, provider failure stores nothing, concurrent loser), and the review CLI functions against a fake connection. See `docs/testing.md` for the run and skip conditions. Not covered by the committed tests: real SQL against PostGIS and TimescaleDB, and Groq calls. The new incidents SQL (schema columns, the history and review queries, `persist_incident` with window columns) and the new `track_history` queries were run by hand against a scratch PostgreSQL 16 with PostGIS and a plain `vessel_position` table, which is not TimescaleDB.
+`agent/tests` (146 tests): state machine and threshold boundary, single-detector cap, freeze tiering, jamming priority, evidence logging, Laya vote handling (including the hypothesis-to-label mapping) and failure isolation, freeze corroboration (minimum pairs, 20-report window), the weak-isolated-flag benign rule, window columns on the persisted row, report input compaction and error handling, tool queries against fake connections (`track_history` bounds and the opt-in `after` slice, the two `incident_history` queries), the report lifecycle (any tier on request, auto flag, stored text reused, force, verification and one redraft, warning banner, expiry and delete keep the incident, provider failure stores nothing, concurrent loser), the agent runtime (tools, validation, rejection, fallback, step limit), each agent's validation bounds and baseline, the incident pipeline's isolation, the threshold agent's bounds and baseline, the Laya-missing log line, and the review CLI functions against a fake connection. See `docs/testing.md` for the run and skip conditions. Not covered by the committed tests: real SQL against PostGIS and TimescaleDB, real model calls (Groq) by any agent, and Laya. The new incidents SQL (schema columns, the history and review queries, `persist_incident` with window columns) and the new `track_history` queries were run by hand against a scratch PostgreSQL 16 with PostGIS and a plain `vessel_position` table, which is not TimescaleDB.
 
 ## Status
 

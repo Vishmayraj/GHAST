@@ -7,15 +7,15 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | Package | Test files | Tests | Run from |
 |---|---|---|---|
 | `ingestion/tests` | `test_normalize.py` | 8 | `ingestion/` |
-| `ml/features/tests` | `test_extract`, `test_pipeline_streaming`, `test_summary` | 20 | `ml/` |
+| `ml/features/tests` | `test_extract`, `test_pipeline_streaming`, `test_quality`, `test_score_histogram`, `test_summary` | 45 | `ml/` |
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
-| `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 36 | `ml/` |
-| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report` | 96 | `agent/` |
-| `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py` | 19 | `scoring/` |
-| total | 23 files | 187 | |
+| `ml/evaluation/tests` | `test_datasets`, `test_harness`, `test_laya_export`, `test_metrics`, `test_score_checkpoint` | 37 | `ml/` |
+| `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report`, `test_agent_runtime`, `test_threshold_agent`, `test_incident_agents`, `test_incident_pipeline` | 146 | `agent/` |
+| `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py`, `test_thresholds_cli.py` | 37 | `scoring/` |
+| total | 30 files | 281 | |
 
-The ML total is 64. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 57 cases for its 13 functions. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
+The ML total is 90. `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `backend/`, `frontend/`, `scripts/`, or `infra/`.
 
 Each package has a `pytest.ini` with a `pythonpath` line so that bare `pytest` resolves the flat imports (`ml/pytest.ini`: `.`; `agent/pytest.ini`: `. ../ml`; `scoring/pytest.ini`: `. ../ml ../agent`). `ingestion/` has no `pytest.ini`; its tests import `normalizer.normalize` and work when run from `ingestion/`.
 
