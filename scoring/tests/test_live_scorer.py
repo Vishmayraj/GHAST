@@ -340,3 +340,24 @@ async def test_a_model_change_triggers_a_retune_even_inside_the_interval() -> No
     store.now = NOW + timedelta(minutes=10)
     await scorer.poll_once()
     assert len(calls) == 2  # start, then again because the active thresholds belong to another model
+
+
+@pytest.mark.asyncio
+async def test_report_retention_loop_purges_repeatedly_and_survives_a_failure(monkeypatch) -> None:
+    import asyncio
+    import live_scorer
+
+    calls = []
+
+    async def fake_purge(pool):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("db hiccup")
+        return 2
+    monkeypatch.setattr(live_scorer, "purge_expired_reports", fake_purge)
+    task = asyncio.create_task(live_scorer.report_retention_loop(object(), 0.01))
+    await asyncio.sleep(0.1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert len(calls) >= 3  # the first call raised and the loop carried on

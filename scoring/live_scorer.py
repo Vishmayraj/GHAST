@@ -26,6 +26,15 @@ Design notes worth knowing before changing anything:
   are expected to be noise. The state machine caps single-detector confidence so those
   escalate instead of being reported, and --max-investigations-per-cycle bounds how many
   investigations one poll can start. Both are first-pass mitigations; per-vessel-class or per-region threshold normalization is future work.
+* Alerting is two-tier. Thresholds A and B are read from `threshold_config` every cycle and
+  kept right by the threshold agent (agent/threshold_agent), which looks again on a schedule
+  and whenever the model version changes. A score at or above A becomes a console incident;
+  at or above B (B > A) it is tier B: its report is drafted automatically and it is listed
+  first. With no row in `threshold_config` the scorer only observes: it scores everything and
+  records the score histogram the threshold agent learns from, and flags nothing.
+  `--static-threshold` restores the old single constant.
+* Transitions the model cannot fairly score (sentinel coordinates, long silences, bad time
+  steps, antimeridian crossings; ml/features/quality.py) never vote and are counted per cycle.
 * freeze_replay's trigger defaults to features.extract.FREEZE_DISPLACEMENT_EPSILON_KNOTS,
   matching the agent's own corroboration check. speed_jump has no swept threshold on
   record yet, so it does not vote unless --speed-jump-threshold is given.
@@ -37,8 +46,10 @@ Usage (from the repo root, with the ml/ and agent/ dependencies installed):
     # one cycle over the last 6 hours of live data, then exit:
     python live_scorer.py ... --once --initial-lookback-minutes 360
 
-No LLM runs in this service. Reports are drafted on request from a stored incident
-(agent/report_generator/on_demand.py), never during scoring.
+Scoring itself calls no LLM. After an incident is stored, `agents.pipeline` runs the fleet-context,
+challenger and triage agents on it, and drafts the report for tier B only
+(agent/report_generator/on_demand.py); tier A reports are drafted on a button press. Without
+GROQ_API_KEY every agent falls back to its deterministic baseline and scoring is unaffected.
 """
 from __future__ import annotations
 
@@ -81,6 +92,8 @@ from tools.incident_history import find_similar_incidents  # noqa: E402
 from tools.jamming_zones import check_jamming_zones  # noqa: E402
 from tools.pattern_classifier import Predict, build_pattern_classifier, load_laya_predictor  # noqa: E402
 from tools.track_history import get_track_history  # noqa: E402
+from agents.pipeline import IncidentPipeline  # noqa: E402
+from report_generator.on_demand import purge_expired_reports  # noqa: E402
 from threshold_agent.agent import Budgets, DEFAULT_BUDGET_A, DEFAULT_BUDGET_B, build_threshold_agent, retune as retune_thresholds  # noqa: E402
 
 logger = logging.getLogger("ghast.scoring")
@@ -581,6 +594,18 @@ def load_model_scorer(checkpoint_path: Path, device_name: str | None) -> tuple[S
     return (lambda window: prediction_errors(model, window)), checkpoint
 
 
+async def report_retention_loop(pool: Any, interval_seconds: float) -> None:
+    """Clear report text older than 24 hours. Incidents, evidence and verdicts are kept forever."""
+    while True:
+        try:
+            cleared = await purge_expired_reports(pool)
+            if cleared:
+                logger.info("report retention: cleared %d expired report(s)", cleared)
+        except Exception:  # noqa: BLE001 - retention must never take the scorer down
+            logger.exception("report retention failed")
+        await asyncio.sleep(interval_seconds)
+
+
 def model_version_of(checkpoint_path: Path, checkpoint: dict, laya_model: str | None) -> str:
     """Identity of the models doing the scoring. It changes when a checkpoint is replaced or the
     Laya model is re-fine-tuned, which is what tells the threshold agent to look again."""
@@ -650,17 +675,29 @@ async def _serve(args: argparse.Namespace) -> int:
             await retune_thresholds(pool, threshold_agent, version, budgets)
 
         dynamic = not args.static_threshold
+        thresholds_now = PostgresThresholds(pool)
+
+        async def threshold_b_now() -> float | None:
+            active = await thresholds_now()
+            return active.b if active else None
+
+        pipeline = IncidentPipeline(pool, client, model, threshold_b_now)
         scorer = LiveScorer(
             PostgresStore(pool), score_errors, build_tools(pool, pattern_predict), build_persist(pool), config,
             threshold_source=PostgresThresholds(pool) if dynamic else None,
             model_version=version,
+            after_persist=pipeline,
             retune=retune if dynamic else None,
             retune_interval_seconds=args.retune_interval_seconds,
         )
         if args.once:
             print(f"cycle: {await scorer.poll_once()}")
             return 0
-        await scorer.run_forever()
+        retention = asyncio.create_task(report_retention_loop(pool, args.retention_interval_seconds))
+        try:
+            await scorer.run_forever()
+        finally:
+            retention.cancel()
         return 0
     finally:
         await pool.close()
@@ -683,6 +720,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--budget-a", type=float, default=float(os.environ.get("GHAST_BUDGET_A", DEFAULT_BUDGET_A)), help="Alert budget for threshold A: share of scoreable reports that may reach the console. Placeholder default; the owner's call.")
     parser.add_argument("--budget-b", type=float, default=float(os.environ.get("GHAST_BUDGET_B", DEFAULT_BUDGET_B)), help="Alert budget for threshold B: share of reports that are reported automatically.")
     parser.add_argument("--retune-interval-seconds", type=float, default=DEFAULT_RETUNE_INTERVAL_SECONDS, help="How often the threshold agent looks again (it also looks right after a model change).")
+    parser.add_argument("--retention-interval-seconds", type=float, default=900.0, help="How often expired (24h old) reports are cleared.")
     parser.add_argument("--once", action="store_true", help="Run one cycle and exit.")
     args = parser.parse_args(argv)
 
