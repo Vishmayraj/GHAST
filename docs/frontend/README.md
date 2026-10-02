@@ -22,7 +22,7 @@ cd frontend/site
 python3 -m http.server 8080
 ```
 
-Open `http://localhost:8080`. Nothing to install. Add `?source=live` to a page to try the live data source (it will show error states until the API exists).
+Open `http://localhost:8080`. Nothing to install. Add `?source=live` to a page to try the live data source (it shows error states unless an API answers at `apiBase`).
 
 ## Files
 
@@ -78,10 +78,10 @@ UI code never reads sample files directly. It calls `GHAST.data.*`:
 | `vesselIncidents(mmsi)` | `GET /vessels/{mmsi}/incidents` |
 | `zones()` | `GET /zones` |
 | `review(id, {verdict, notes})` | `POST /incidents/{id}/review` |
-| `reviewStats()` | no endpoint yet. Plan 02 must add one for plan 01 part D3 |
-| `thresholds()` | no endpoint yet. Comes from plan 01 part B |
+| `reviewStats()` | `GET /review-stats` |
+| `thresholds()` | `GET /thresholds` (live returns `{active, history}`, sample returns the older `{chosen, options}` shape and `trust.js` accepts both) |
 
-Field names in `data/sample.js` match plan 02. When the real API differs, change `sample.js` and `live.js`, not the modules.
+Field names in `data/sample.js` match the real API (`backend/api/models.py`). Incident ids are UUID strings. Fields the API cannot fill are `null` and the modules handle that: `track[].predicted_lat/lon` (not stored, so the map draws no prediction circles), `fleet_context.radius_km` and `fleet_context.isolated` (`null` means too few neighbours to judge), `report_text` (null until a report is drafted), `confidence`.
 
 Each backend feature has a fixed `data-module` slot:
 
@@ -91,24 +91,25 @@ Each backend feature has a fixed `data-module` slot:
 | `incident-queue` | console | 02 `/incidents` |
 | `incident-detail` | console | 02 `/incidents/{id}`, 01 C |
 | `detector-votes` | console | 01 C4, 04 (the Laya row has a "shadow" tag until plan 04 enables it) |
-| `fleet-context` | console | 03 B |
+| `fleet-context` | console | 03 B. Today it reads the fleet-context agent's output stored on the incident |
 | `map` | console | 02 track, 03 A zones |
 | `review-form` | console | 01 D, 02 review POST |
 | `alert-budget` | trust | 01 A and B |
 | `review-stats` | trust | 01 D3, needs 30 or more reviews |
 | `playground` | home | none, it is an illustration |
 
+The console also shows the challenger agent's argument (`challenge` in the incident detail) as a plain block under the evidence, with no slot of its own.
+
 Slots for plan 05 (`model-versions`) and plan 06 (`artifact-provenance`) do not exist yet. Add them to `trust.html` when those plans land.
 
 ## Going live checklist
 
-1. Plan 02 API is running. Set `apiBase` in `scripts/config.js` and `source: "live"`.
-2. Allow the site's origin in the API's CORS settings, or serve both behind one nginx.
-3. The `apiKey` in `config.js` is visible to anyone who opens the page. It is a stopgap for plan 02's simple key. Real auth is Stage 3.
-4. Reconcile field names (see above). Check `incident.votes`, `fleet_context`, `tool_call_log` and `track`.
-5. Replace the SVG map in `console.js` (`renderMap`) with MapLibre GL, loaded from a script tag. The base-map tile source is an open owner decision. Keep the `[data-module="map"]` wrapper and the single render function.
-6. Move the console into `frontend/dashboard/` (plan 02), or make `console.html` the dashboard. The decision was: the dashboard stays vanilla and reuses these modules, no second design.
-7. Remove the "Sample data" tags only on modules that are really reading the API. They show automatically when `source` is `sample`.
+1. Under compose this is already done: the image sets `source: "live"` and `apiBase: "/api"`, and nginx proxies `/api/` to the backend with the key. Opening `?source=live` on a plain static server also works if `apiBase` points at the API.
+2. Outside compose, set `GHAST_CORS_ORIGINS` on the API to the site's origin and put the key in `config.js`. That key is visible to anyone who opens the page. Real auth is Stage 3.
+3. Done: field names reconciled against `backend/api/models.py` and checked once with the real FastAPI app (fake pool) and the console under jsdom.
+4. Replace the SVG map in `console.js` (`renderMap`) with MapLibre GL, loaded from a script tag. The base-map tile source is an open owner decision. Keep the `[data-module="map"]` wrapper and the single render function.
+5. `console.html` is the dashboard. `frontend/dashboard/` stays an empty placeholder.
+6. Remove the "Sample data" tags only on modules that are really reading the API. They show automatically when `source` is `sample`.
 
 ## Open items
 

@@ -30,7 +30,7 @@ site/
     config.js             source: "sample" or "live", apiBase, apiKey
     data/api.js           window.GHAST.data, the only thing UI code calls
     data/sample.js        sample implementation (fictional vessels, relative times)
-    data/live.js          fetch implementation of the plan 02 endpoints
+    data/live.js          fetch implementation of the backend API endpoints
     console.js            console modules
     trust.js              trust modules
     scroll-hero.js        two-phase scroll-scrub (home only)
@@ -47,7 +47,7 @@ fallbacks. Self-hosting them is a follow-up.
 
 UI code never reads sample files directly. It calls `GHAST.data.*`, which
 resolves to the sample or live implementation from `config.js` (or
-`?source=live`). Field names match plan 02, so going live is a config change.
+`?source=live`). Field names match `backend/api/models.py`, so going live is a config change.
 If the API differs, change `data/sample.js` and `data/live.js`, not the modules.
 
 Each backend feature has a fixed `data-module` slot:

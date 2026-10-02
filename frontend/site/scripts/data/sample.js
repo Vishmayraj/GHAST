@@ -11,33 +11,33 @@
   };
 
   var raw = [
-    { id: 1048, mmsi: "244710820", vessel_name: "MV Kestrel Bay", mins: 14, hypothesis: "targeted_spoof", confidence: 0.81, status: "escalated", rv: null,
+    { id: "1048", mmsi: "244710820", vessel_name: "MV Kestrel Bay", mins: 14, hypothesis: "targeted_spoof", confidence: 0.81, status: "escalated", rv: null,
       votes: [votes.pred(0.0187, 0.0049), votes.freeze(false, 0), votes.laya("teleport_jump", 0.88)],
-      fleet: { cluster_vessels: 1, radius_km: 25, isolated: true },
+      fleet: { scope: "isolated", cluster_vessels: 1, neighbours_checked: 9, radius_km: 25, isolated: true },
       evidence: ["The reported position jumped about 340 m in 12 seconds, more than this vessel can turn or travel at its speed.", "No other vessel within 25 km flagged in the same period.", "The position is outside every known jamming area.", "No earlier incident on this vessel."] },
-    { id: 1047, mmsi: "538007112", vessel_name: "Northern Tern", mins: 52, hypothesis: "jamming", confidence: 0.77, status: "reported", rv: null,
+    { id: "1047", mmsi: "538007112", vessel_name: "Northern Tern", mins: 52, hypothesis: "jamming", confidence: 0.77, status: "reported", rv: null,
       votes: [votes.pred(0.0094, 0.0049), votes.freeze(false, 0), votes.laya("gradual_drift", 0.74)],
-      fleet: { cluster_vessels: 7, radius_km: 18, isolated: false },
+      fleet: { scope: "area", cluster_vessels: 7, neighbours_checked: 12, radius_km: 18, isolated: false },
       evidence: ["Seven vessels within 18 km flagged in the same 10 minutes.", "Reported positions drift in the same direction on all seven."] },
-    { id: 1045, mmsi: "636019330", vessel_name: "Alder Point", mins: 3 * 60 + 10, hypothesis: "freeze_replay", confidence: 0.69, status: "reported", rv: null,
+    { id: "1045", mmsi: "636019330", vessel_name: "Alder Point", mins: 3 * 60 + 10, hypothesis: "freeze_replay", confidence: 0.69, status: "reported", rv: null,
       votes: [votes.pred(0.0061, 0.0049), votes.freeze(true, 6), votes.laya("freeze_replay", 0.91)],
-      fleet: { cluster_vessels: 1, radius_km: 25, isolated: true },
+      fleet: { scope: "isolated", cluster_vessels: 1, neighbours_checked: 9, radius_km: 25, isolated: true },
       evidence: ["Six consecutive reports repeat the same position while reported speed stays above 8 knots.", "No other vessel nearby is affected."] },
-    { id: 1043, mmsi: "219884005", vessel_name: "Sofie Marit", mins: 6 * 60, hypothesis: "equipment_fault", confidence: 0.58, status: "escalated", rv: null,
+    { id: "1043", mmsi: "219884005", vessel_name: "Sofie Marit", mins: 6 * 60, hypothesis: "equipment_fault", confidence: 0.58, status: "escalated", rv: null,
       votes: [votes.pred(0.0072, 0.0049), votes.freeze(false, 0), votes.laya("impossible_kinematics", 0.66)],
-      fleet: { cluster_vessels: 1, radius_km: 25, isolated: true },
+      fleet: { scope: "isolated", cluster_vessels: 1, neighbours_checked: 9, radius_km: 25, isolated: true },
       evidence: ["Speed over ground reads above 60 knots for two reports, then returns to normal.", "Position stays consistent with the earlier track."] },
-    { id: 1040, mmsi: "477123900", vessel_name: "Harbour Wren", mins: 9 * 60, hypothesis: "benign", confidence: 0.41, status: "reported", rv: null,
+    { id: "1040", mmsi: "477123900", vessel_name: "Harbour Wren", mins: 9 * 60, hypothesis: "benign", confidence: 0.41, status: "reported", rv: null,
       votes: [votes.pred(0.0052, 0.0049), votes.freeze(false, 0), votes.laya("normal_track", 0.93)],
-      fleet: { cluster_vessels: 1, radius_km: 25, isolated: true },
+      fleet: { scope: "isolated", cluster_vessels: 1, neighbours_checked: 9, radius_km: 25, isolated: true },
       evidence: ["Only the prediction error detector fired, and only just over its threshold.", "The vessel was drifting at anchor."] },
-    { id: 1031, mmsi: "311042700", vessel_name: "Calder Reach", mins: 30 * 60, hypothesis: "targeted_spoof", confidence: 0.84, status: "resolved", rv: "confirmed_spoof",
+    { id: "1031", mmsi: "311042700", vessel_name: "Calder Reach", mins: 30 * 60, hypothesis: "targeted_spoof", confidence: 0.84, status: "resolved", rv: "confirmed_spoof",
       votes: [votes.pred(0.0213, 0.0049), votes.freeze(false, 0), votes.laya("teleport_jump", 0.9)],
-      fleet: { cluster_vessels: 1, radius_km: 25, isolated: true },
+      fleet: { scope: "isolated", cluster_vessels: 1, neighbours_checked: 9, radius_km: 25, isolated: true },
       evidence: ["Position moved 2.1 km between two reports 20 seconds apart.", "Neighbouring vessels were unaffected."] },
-    { id: 1024, mmsi: "563201880", vessel_name: "Tamsin Ray", mins: 52 * 60, hypothesis: "jamming", confidence: 0.72, status: "resolved", rv: "unclear",
+    { id: "1024", mmsi: "563201880", vessel_name: "Tamsin Ray", mins: 52 * 60, hypothesis: "jamming", confidence: 0.72, status: "resolved", rv: "unclear",
       votes: [votes.pred(0.0088, 0.0049), votes.freeze(false, 0), votes.laya("gradual_drift", 0.6)],
-      fleet: { cluster_vessels: 4, radius_km: 20, isolated: false },
+      fleet: { scope: "area", cluster_vessels: 4, neighbours_checked: 12, radius_km: 20, isolated: false },
       evidence: ["Four vessels within 20 km flagged together.", "Not enough reports to rule out a shared receiver fault."] }
   ];
 
@@ -69,6 +69,7 @@
       { tool: "incident_history", summary: "Looked for earlier incidents on this vessel and the same pattern elsewhere.", at: ago(r.mins * MIN - 25000) },
       { tool: "form_hypothesis", summary: names[r.hypothesis] + " at " + Math.round(r.confidence * 100) + " percent.", at: ago(r.mins * MIN - 26000) }
     ];
+    d.challenge = r.hypothesis === "benign" ? { benign_likelihood: 0.74, argument: "Only the prediction error detector fired, barely over its threshold, on a vessel that was drifting at anchor." } : null;
     d.report_text = "Sample report. " + d.evidence.map(function (e) { return e.text; }).join(" ");
     d.track = track(r, r.id);
     return d;
@@ -83,19 +84,19 @@
       return wait({ items: rows.map(summary) });
     },
     incident: function (id) {
-      var r = raw.filter(function (x) { return x.id === Number(id); })[0];
+      var r = raw.filter(function (x) { return x.id === String(id); })[0];
       return r ? wait(detail(r)) : Promise.reject(new Error("Incident not found"));
     },
     track: function (mmsi) { var r = raw.filter(function (x) { return x.mmsi === mmsi; })[0]; return wait(r ? track(r, r.id) : []); },
     vesselIncidents: function (mmsi) { return wait({ items: raw.filter(function (r) { return r.mmsi === mmsi; }).map(summary) }); },
     zones: function () { return wait({ type: "FeatureCollection", features: [] }); },
     review: function (id, body) {
-      var r = raw.filter(function (x) { return x.id === Number(id); })[0];
+      var r = raw.filter(function (x) { return x.id === String(id); })[0];
       r.status = "resolved"; r.rv = body.verdict; return wait(summary(r));
     },
     reviewStats: function () { return wait({ reviewed: 2, minimum: 30, rows: [] }); },
     thresholds: function () {
-      return wait({ chosen: null, options: [{ flag_rate: 5, threshold: null }, { flag_rate: 1, threshold: null }, { flag_rate: 0.5, threshold: null }, { flag_rate: 0.1, threshold: null }] });
+      return wait({ active: null, history: [], chosen: null, options: [{ flag_rate: 5, threshold: null }, { flag_rate: 1, threshold: null }, { flag_rate: 0.5, threshold: null }, { flag_rate: 0.1, threshold: null }] });
     }
   };
 })();

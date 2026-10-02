@@ -1,4 +1,4 @@
-/* Live implementation. Calls the API from plan 02. Unused until it exists. */
+/* Live implementation. Calls backend/api (see docs/backend-and-frontend.md). */
 (function () {
   var cfg = window.GHAST_CONFIG;
   function get(path, params) {
@@ -13,7 +13,6 @@
       return r.json();
     });
   }
-  function unsupported() { return Promise.reject(new Error("Not available from the API yet")); }
   window.GHAST_LIVE = {
     health: function () { return get("/health"); },
     incidents: function (p) { return get("/incidents", p); },
@@ -22,7 +21,7 @@
     vesselIncidents: function (mmsi) { return get("/vessels/" + mmsi + "/incidents"); },
     zones: function () { return get("/zones"); },
     review: function (id, body) { return call("/incidents/" + id + "/review", { method: "POST", body: JSON.stringify(body) }); },
-    reviewStats: unsupported,
-    thresholds: unsupported
+    reviewStats: function () { return get("/review-stats"); },
+    thresholds: function () { return get("/thresholds"); }
   };
 })();

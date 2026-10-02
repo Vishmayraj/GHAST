@@ -1,5 +1,5 @@
 # frontend/dashboard/
 
-The real analyst dashboard (plan 02). Vanilla JS, no build step. Start from `site/console.html`
-and its scripts, set `source: "live"` in `config.js`, and swap the SVG map module for MapLibre GL
-(loaded from a script tag) once the base-map tile source is decided. Not started.
+Empty on purpose. The analyst dashboard is `frontend/site/console.html` with `scripts/console.js`,
+reading the API through the data facade. The Docker image switches it to live data. Nothing here
+to build. Delete this directory if you do not want the placeholder.
