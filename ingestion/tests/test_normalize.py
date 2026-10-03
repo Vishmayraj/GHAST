@@ -2,7 +2,9 @@ from datetime import timezone
 
 import pytest
 
-from normalizer.normalize import normalize_envelope, parse_time_utc
+import copy
+
+from normalizer.normalize import drain_drop_counts, normalize_envelope, parse_time_utc
 
 POSITION_REPORT_ENVELOPE = {
     "MessageType": "PositionReport",
@@ -136,3 +138,76 @@ def test_normalize_falls_back_to_lowercase_metadata_keys():
     assert record["mmsi"] == 111222333
     assert record["ship_name"] == "lowercase test"
     assert record["latitude"] == pytest.approx(1.5)
+
+
+def _position(**changes):
+    """The position fixture with fields of MetaData or the message body replaced."""
+    envelope = copy.deepcopy(POSITION_REPORT_ENVELOPE)
+    for key, value in changes.items():
+        target = envelope["MetaData"] if key in ("MMSI", "Latitude", "Longitude", "time_utc") else envelope["Message"]["PositionReport"]
+        target[key] = value
+    return envelope
+
+
+@pytest.fixture(autouse=True)
+def _clean_drop_counts():
+    drain_drop_counts()
+    yield
+    drain_drop_counts()
+
+
+@pytest.mark.parametrize("latitude,longitude", [(91.0, 181.0), (91.0, 10.0), (10.0, 181.0), (-90.5, 0.0), (0.0, -180.5), (float("nan"), 0.0), ("north", 0.0)])
+def test_out_of_range_or_sentinel_coordinates_drop_the_message(latitude, longitude):
+    assert normalize_envelope(_position(Latitude=latitude, Longitude=longitude)) is None
+    assert drain_drop_counts() == {"invalid_coordinate": 1}
+
+
+def test_edge_coordinates_are_kept():
+    for lat, lon in ((90.0, 180.0), (-90.0, -180.0), (0.0, 0.0)):
+        record = normalize_envelope(_position(Latitude=lat, Longitude=lon))
+        assert (record["latitude"], record["longitude"]) == (lat, lon)
+
+
+def test_message_the_sender_marked_invalid_is_dropped():
+    assert normalize_envelope(_position(Valid=False)) is None
+    assert drain_drop_counts() == {"invalid_flag": 1}
+    assert normalize_envelope(_position(Valid=True)) is not None
+
+
+def test_not_available_values_become_null_and_real_values_stay():
+    record = normalize_envelope(_position(Sog=102.3, Cog=360.0, TrueHeading=511))
+    assert (record["sog_knots"], record["cog_deg"], record["true_heading_deg"]) == (None, None, None)
+    real = normalize_envelope(_position(Sog=102.2, Cog=359.9, TrueHeading=359))
+    assert (real["sog_knots"], real["cog_deg"], real["true_heading_deg"]) == (102.2, 359.9, 359)
+    at_rest = normalize_envelope(_position(Sog=0.0, Cog=0.0, TrueHeading=0))
+    assert (at_rest["sog_knots"], at_rest["cog_deg"], at_rest["true_heading_deg"]) == (0.0, 0.0, 0)
+
+
+def test_missing_and_junk_motion_fields_become_null_without_failing():
+    record = normalize_envelope(_position(Sog=None, Cog="n/a", TrueHeading=-3))
+    assert (record["sog_knots"], record["cog_deg"], record["true_heading_deg"]) == (None, None, None)
+
+
+def test_a_malformed_timestamp_drops_one_message_and_does_not_raise():
+    for bad in ("yesterday", "2023-05-10 11:46:52 +0100 CET", 12345):
+        assert normalize_envelope(_position(time_utc=bad)) is None
+    assert drain_drop_counts() == {"bad_timestamp": 3}
+    assert normalize_envelope(POSITION_REPORT_ENVELOPE) is not None  # the next message is fine
+
+
+def test_a_non_numeric_mmsi_drops_the_message():
+    assert normalize_envelope(_position(MMSI="abc")) is None
+    assert drain_drop_counts() == {"bad_mmsi": 1}
+
+
+def test_drain_returns_counts_once_then_resets():
+    normalize_envelope(_position(Latitude=91.0, Longitude=181.0))
+    normalize_envelope(_position(Latitude=91.0, Longitude=181.0))
+    assert drain_drop_counts() == {"invalid_coordinate": 2}
+    assert drain_drop_counts() == {}
+
+
+def test_static_messages_survive_a_bad_timestamp_the_same_way():
+    envelope = copy.deepcopy(SHIP_STATIC_DATA_ENVELOPE)
+    envelope["MetaData"]["time_utc"] = "garbage"
+    assert normalize_envelope(envelope) is None

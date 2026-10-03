@@ -6,7 +6,7 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 
 | Package | Test files | Tests | Run from |
 |---|---|---|---|
-| `ingestion/tests` | `test_normalize.py` | 8 | `ingestion/` |
+| `ingestion/tests` | `test_normalize.py` | 17 | `ingestion/` |
 | `ml/features/tests` | `test_extract`, `test_pipeline_streaming`, `test_quality`, `test_score_histogram`, `test_summary` | 45 | `ml/` |
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
@@ -16,7 +16,7 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py`, `test_thresholds_cli.py` | 37 | `scoring/` |
 | `backend/tests` | `test_api.py` | 22 (29 cases, one test is parametrized over 8 routes) | `backend/` |
 | `scripts/tests` | `test_load_jamming_zones.py` | 15 (25 cases, a few are parametrized) | `scripts/` |
-| total | 33 files | 336 | |
+| total | 33 files | 345 | |
 
 The ML total is 103 (90 plus the 13 clustering tests). `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `frontend/`, `infra/`, or `scripts/import_marinecadastre.py`. The frontend modules were exercised once under jsdom against the real API app with a fake pool; that check is not in the repo.
 
@@ -68,7 +68,7 @@ Gaps in the path filters, from the lists themselves: a change to `ml/features/**
 
 ## What is covered
 
-Ingestion: `normalize_envelope` and `parse_time_utc` (nanosecond truncation, missing fractions, bad format, both metadata casings, unsupported types, missing MMSI).
+Ingestion: `normalize_envelope` and `parse_time_utc` (nanosecond truncation, missing fractions, bad format, both metadata casings, unsupported types, missing MMSI, coordinate range and sentinel position, `Valid` flag, AIS not-available SOG/COG/heading, malformed timestamp and MMSI drops, drop counts).
 
 ML features: implied speed with irregular time steps, mask columns, window sizing and minimum length; streaming windows flushed at vessel boundaries, `max_vessels`, `max_windows`, `max_rows`, progress callback, against a fake connection; the summary text (determinism, teleport, freeze, replay, kinematics, no dependence on a cached implied-speed column, short tracks), using hand-built altered tracks as fixtures.
 

@@ -58,8 +58,8 @@ Normalizer (`normalize_envelope`, pure function):
 - Position types produce `{"kind": "position", ...}` with `mmsi`, `received_at`, `ship_name`, `message_type`, `latitude`, `longitude`, `sog_knots` (`Sog`), `cog_deg` (`Cog`), `true_heading_deg` (`TrueHeading`), `rate_of_turn` (`RateOfTurn`), `navigational_status`, `raim`, `position_accuracy`.
 - `ShipStaticData` produces `{"kind": "static", ...}` with `call_sign`, `imo_number`, `ship_type` (`Type`), `destination`, `max_draught` (`MaximumStaticDraught`). `ship_name` comes from `MetaData.ShipName`, not from the body's `Name`.
 - Metadata keys are looked up in both casings (`MMSI`/`mmsi`, `Latitude`/`latitude`, `time_utc`/`TimeUtc`).
-- `time_utc` looks like `2023-05-10 11:46:52.509865357 +0000 UTC`; nanoseconds are truncated to microseconds. An unparseable string raises `ValueError`, which is not caught in `main.py` and would end the service.
-- Not done: no range check on latitude/longitude, no check of the `Valid` flag, and AIS "not available" sentinels (for example heading 511) are stored as reported.
+- `time_utc` looks like `2023-05-10 11:46:52.509865357 +0000 UTC`; nanoseconds are truncated to microseconds. An unparseable string (or a non-numeric MMSI) drops that one message and counts it as `bad_timestamp` or `bad_mmsi`.
+- Position hygiene: a latitude outside -90..90 or longitude outside -180..180 (this includes the AIS "not available" position 91, 181) drops the message (`invalid_coordinate`); `Valid: false` drops it (`invalid_flag`). SOG 102.3 or above, COG 360 or above, and heading 511 (or outside 0..359) are stored as NULL. Drops are counted, and `main.py` logs one summary line per flush instead of a line per message.
 
 Batching and writes (`main.py`, `storage.py`):
 
@@ -188,7 +188,6 @@ The pipeline does not normalize data inside the database. Feature extraction and
 
 Known limitations, all read from code and not measured:
 
-- No coordinate range check or AIS sentinel handling in the normalizer.
 - No dedupe on `vessel_position`; the importer can double-load.
-- A malformed `time_utc` or a database error stops the ingestion process.
+- A database error stops the ingestion process. A malformed `time_utc` no longer does.
 - `IngestionConfig` has two different sets of host defaults depending on how it is constructed.

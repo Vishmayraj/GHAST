@@ -160,7 +160,7 @@ Agent behavior:
 
 Operations:
 
-12. `ingestion` stops on a malformed timestamp or a database error (compose restarts it), and has no dedupe.
+12. `ingestion` stops on a database error (compose restarts it), and has no dedupe. A malformed timestamp now drops one message instead.
 13. Compose has no healthchecks; `scoring` may start before the schema exists and retries.
 14. `ml/checkpoints/epoch_010.pt` and the Laya weights exist only outside the repo.
 15. The importer is not idempotent.

@@ -18,7 +18,7 @@ import time
 
 from collector.client import stream_envelopes
 from collector.config import IngestionConfig
-from normalizer.normalize import normalize_envelope
+from normalizer.normalize import drain_drop_counts, normalize_envelope
 from storage import RawArchiver, TimescaleWriter
 
 logging.basicConfig(
@@ -55,6 +55,9 @@ async def run() -> None:
             await writer.write_static(static_batch)
             static_batch = []
         archiver.flush()
+        dropped = drain_drop_counts()
+        if dropped:
+            logger.warning("dropped messages since last flush: %s", dropped)
         last_flush = time.monotonic()
 
     try:
