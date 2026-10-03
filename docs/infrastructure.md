@@ -15,7 +15,7 @@ docker compose up -d
 |---|---|---|---|---|
 | `timescaledb` | `timescale/timescaledb-ha:pg16` | `${POSTGRES_PORT:-5432}` to 5432 | none | volume `timescaledb_data` at `/home/postgres/pgdata/data` |
 | `minio` | built from `infra/docker/Dockerfile` | 9000 (API), 9001 (console) | none | volume `minio_data` at `/data` |
-| `ingestion` | `ingestion/Dockerfile` | none | `timescaledb`, `minio` | applies `schema.sql`, then streams AISStream |
+| `ingestion` | `ingestion/Dockerfile` | none | `timescaledb`, `minio` | runs the migrator, then streams AISStream |
 | `scoring` | `scoring/Dockerfile` (CPU torch) | none | `timescaledb`, `ingestion` | runs `live_scorer.py --min-votes 2` |
 | `frontend` | `frontend/Dockerfile` (nginx) | `${FRONTEND_PORT:-3000}` to 80 | `ingestion` | serves `frontend/site/` as static files |
 

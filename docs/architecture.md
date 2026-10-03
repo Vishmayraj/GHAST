@@ -82,7 +82,7 @@ What differs from the brief's diagram:
 ```text
 ingestion/            AISStream client, normalizer, TimescaleDB writer, MinIO archiver
 scripts/              import_marinecadastre.py (historical loader)
-backend/models/       schema.sql (the only backend content)
+backend/models/       migrations/ (numbered SQL), schema.sql (generated snapshot), api_role.sql
 ml/features/          extract, pipeline (windows), summary (Laya text)
 ml/models/bilstm/     model, infer, threshold
 ml/training/          train, dataset_cache, window_policy
@@ -106,10 +106,10 @@ The full table is in `docs/ml-pipeline.md`. In short: PostgreSQL holds source da
 
 | Component | Implemented | Tested | Used in a real run | Notes |
 |---|---|---|---|---|
-| live ingestion | yes | normalizer only | yes | no dedupe, no coordinate checks |
+| live ingestion | yes | normalizer and storage tests (fake pool) | yes | dedupe index and coordinate checks never run against a real database |
 | MinIO raw archive | yes | no | yes | write-only |
 | historical importer | yes | no | yes (April 2026) | not idempotent |
-| schema | yes | no | yes | no migrations |
+| schema | yes | runner tested with a fake connection | yes | migrations never applied to a real database |
 | feature extraction and windows | yes | yes (fakes) | yes | |
 | BiLSTM training | yes | partly (helpers, not the epoch loop) | yes | `epoch_010.pt`, file not in repo |
 | `score_checkpoint` | yes | helpers only | yes, elsewhere | results not reproducible from repo |
@@ -131,7 +131,7 @@ Implemented and working as far as the code and tests show: the ingestion path, f
 
 Experimental (in the code but unvalidated on real events): the freeze detector and corroboration, the single-detector confidence cap, the Laya vote, all confidence values.
 
-Proposed and not built: per-vessel-class or per-region thresholds, tuning of the fleet clustering parameters, transformer models, automated jamming zone ingestion, database migrations.
+Proposed and not built: per-vessel-class or per-region thresholds, tuning of the fleet clustering parameters, transformer models, automated jamming zone ingestion.
 
 Currently broken or misleading:
 
@@ -160,7 +160,7 @@ Agent behavior:
 
 Operations:
 
-12. `ingestion` stops on a database error (compose restarts it), and has no dedupe. A malformed timestamp now drops one message instead.
+12. `ingestion` stops on a database error (compose restarts it), and no longer stores exact duplicate reports. A malformed timestamp now drops one message instead.
 13. Compose has no healthchecks; `scoring` may start before the schema exists and retries.
 14. `ml/checkpoints/epoch_010.pt` and the Laya weights exist only outside the repo.
 15. The importer is not idempotent.

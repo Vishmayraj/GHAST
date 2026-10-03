@@ -70,11 +70,11 @@ Batching and writes (`main.py`, `storage.py`):
 | flush interval | 10 s | `_FLUSH_INTERVAL_SECONDS` |
 | raw archive flush size | 500 envelopes | `RawArchiver(flush_every=500)` |
 
-- Positions are written with `executemany` of an `INSERT` that builds the geography with `ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography`. There is no unique constraint and no `ON CONFLICT`, so a repeated message is stored twice.
+- Positions are written with `executemany` of an `INSERT` that builds the geography with `ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography`. The insert ends in `ON CONFLICT DO NOTHING` and migration `0003` adds a unique index on `(mmsi, received_at, latitude, longitude)`, so a repeated message is stored once. The migration first deletes existing duplicates; that delete has never been run on real data and is slow on millions of rows.
 - Static records are upserted on `mmsi` and always overwrite every column (`vessel_static` keeps no history, only the latest message).
 - The 10 second timer is checked only when an envelope arrives. On a stream that goes quiet, a partial batch waits for the next message.
 - The asyncpg pool has `min_size=1, max_size=5`.
-- `TimescaleWriter.connect()` runs the whole of `backend/models/schema.sql` on every start. That file is the only place tables are created. If the file is missing the writer logs a warning and assumes the tables exist.
+- `TimescaleWriter.connect()` runs the migrator (`scripts/migrate.py`) on every start. It applies the numbered files in `backend/models/migrations/` that are not yet recorded in `schema_migrations`, each in its own transaction, under an advisory lock. `backend/models/schema.sql` is a generated snapshot of all migrations and nothing applies it any more.
 - A failed database write raises out of `run()`. The `finally` block tries to flush once more and closes the pool; buffered rows from that batch are lost if the write keeps failing. Compose restarts the container (`restart: unless-stopped`).
 
 ## Raw archive (MinIO)
@@ -117,7 +117,7 @@ The repo's own docs (`ml/training/README.md`, `docs/DEVELOPER_GUIDE.md`) describ
 
 ## Database schema
 
-Defined in `backend/models/schema.sql`. Requires the `timescaledb` and `postgis` extensions (`timescale/timescaledb-ha:pg16` ships both). Every statement is `IF NOT EXISTS` except the `incidents.hypothesis` constraint, which is dropped and re-added on every run. There is no migration tool; changing a column means editing SQL by hand on an existing database.
+Defined by `backend/models/migrations/` (`schema.sql` is the generated concatenation). Requires the `timescaledb` and `postgis` extensions (`timescale/timescaledb-ha:pg16` ships both). Every statement is `IF NOT EXISTS` except the `incidents.hypothesis` constraint, which is dropped and re-added on every run. To change the schema, add the next numbered migration and run `python scripts/migrate.py snapshot`; a test fails if `schema.sql` is stale. Editing an applied migration is refused. The baseline is idempotent, so it applies cleanly to a database created from the old `schema.sql`. Never run against a real database.
 
 ### `vessel_position` (hypertable on `received_at`)
 
@@ -182,12 +182,12 @@ The pipeline does not normalize data inside the database. Feature extraction and
 | collector reconnect, config parsing, storage, MinIO archiver | implemented, no tests |
 | raw archive read-back / replay | not implemented |
 | historical importer | implemented, used for the April 2026 backfill; no tests, not idempotent |
-| schema | implemented; no migrations |
+| schema | implemented; numbered migrations and a runner, tested with a fake connection only |
 | `jamming_zones` data | table exists; `scripts/load_jamming_zones.py` loads a curated GeoJSON file (tested with fakes, never run against a database); no zone file has been curated yet |
 | `vessel_static` for historical vessels | not populated by the importer |
 
 Known limitations, all read from code and not measured:
 
-- No dedupe on `vessel_position`; the importer can double-load.
+- The importer can still double-load: the unique index makes a second load fail or skip depending on the copy path, and nothing records which files were loaded (plan 06 step 4 not done).
 - A database error stops the ingestion process. A malformed `time_utc` no longer does.
 - `IngestionConfig` has two different sets of host defaults depending on how it is constructed.

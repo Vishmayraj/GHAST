@@ -6,7 +6,7 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 
 | Package | Test files | Tests | Run from |
 |---|---|---|---|
-| `ingestion/tests` | `test_normalize.py` | 17 | `ingestion/` |
+| `ingestion/tests` | `test_normalize.py`, `test_storage.py` | 20 | `ingestion/` |
 | `ml/features/tests` | `test_extract`, `test_pipeline_streaming`, `test_quality`, `test_score_histogram`, `test_summary` | 45 | `ml/` |
 | `ml/training/tests` | `test_dataset_cache`, `test_window_policy` | 7 | `ml/` |
 | `ml/models/bilstm/tests` | `test_model.py` | 1 | `ml/` |
@@ -15,8 +15,8 @@ Map of the test suite as it exists. Nothing was executed while writing this docu
 | `agent/tests` | `test_state_machine`, `test_pattern_classifier`, `test_freeze_corroboration`, `test_report`, `test_jamming_zones`, `test_track_history`, `test_incident_history`, `test_review`, `test_on_demand_report`, `test_agent_runtime`, `test_threshold_agent`, `test_incident_agents`, `test_incident_pipeline` | 151 | `agent/` |
 | `scoring/tests` | `test_live_scorer.py`, `test_review_stats.py`, `test_thresholds_cli.py` | 37 | `scoring/` |
 | `backend/tests` | `test_api.py` | 22 (29 cases, one test is parametrized over 8 routes) | `backend/` |
-| `scripts/tests` | `test_load_jamming_zones.py` | 15 (25 cases, a few are parametrized) | `scripts/` |
-| total | 33 files | 345 | |
+| `scripts/tests` | `test_load_jamming_zones.py`, `test_migrate.py` | 27 (37 cases, a few are parametrized) | `scripts/` |
+| total | 35 files | 360 | |
 
 The ML total is 103 (90 plus the 13 clustering tests). `test_score_checkpoint` has a parametrized parity grid, so pytest reports 58 cases for its 14 functions. The newest of those, `test_quality_gate_leaves_out_unscorable_reports_and_counts_them`, needs torch and was written without being run. There are no tests for `frontend/`, `infra/`, or `scripts/import_marinecadastre.py`. The frontend modules were exercised once under jsdom against the real API app with a fake pool; that check is not in the repo.
 
@@ -37,12 +37,8 @@ None of the tests touch PostgreSQL, MinIO, the network, a real checkpoint, Groq,
 
 | Suite | Third-party packages actually needed |
 |---|---|
-| `ingestion/tests` | `pytest` only (the normalizer imports nothing outside the stdlib). `requirements-dev.txt` also installs `websockets`, `asyncpg`, `minio`, which the tests do not import. |
-| `ml/models/clustering/tests` | `numpy`, `pytest` only. |
-| `ml/*` (the rest) | `torch`, `numpy`, `asyncpg` (imported by `features.pipeline`), `pytest`. `requirements-dev.txt` also brings `mlflow`, `scikit-learn`, `pandas`, `psycopg`, `tqdm`, `psutil`; only `psutil` is imported by code under test (inside `score_checkpoint.run`, which is not tested). |
-| `agent/tests` | `numpy`, `asyncpg`, `pytest`, `pytest-asyncio`. No torch: `state_machine` imports only `models.bilstm.threshold`, which is a constant. |
-| `scoring/tests` | same as agent. `live_scorer` imports torch only inside `load_model_scorer`, which is not called. |
-| `scripts/tests` | `pytest`, `pytest-asyncio`. The loader imports `asyncpg` only inside `_run`, which the tests replace. |
+| `ingestion/tests` | `pytest`, `pytest-asyncio`; `test_storage.py` imports `asyncpg` and `minio` (all in `requirements-dev.txt`). The normalizer tests need only the stdlib. |
+| `scripts/tests` | `pytest`, `pytest-asyncio`. The loader and migrator import `asyncpg` only inside functions the tests replace or never call. |
 | `backend/tests` | `fastapi`, `httpx`, `pytest`, `pydantic` (all in `backend/requirements-dev.txt`). `asyncpg` is imported only when the app builds its own pool, which the tests never do. |
 
 `ml/requirements.txt` says `torch>=2.2` with no index URL, so on Linux CI it pulls the default CUDA build. That works but is a large download for every ML workflow.

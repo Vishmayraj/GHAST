@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - "ingestion/**"
+      - "scripts/migrate.py"
+      - "backend/models/migrations/**"
       - ".github/workflows/ingestion-tests.yml"
   pull_request:
     paths:
       - "ingestion/**"
+      - "scripts/migrate.py"
+      - "backend/models/migrations/**"
       - ".github/workflows/ingestion-tests.yml"
 
 defaults:

@@ -2,9 +2,9 @@ name: scripts-tests
 on:
   push:
     branches: [main]
-    paths: ["scripts/**", "backend/models/schema.sql", ".github/workflows/scripts-tests.yml"]
+    paths: ["scripts/**", "backend/models/schema.sql", "backend/models/migrations/**", ".github/workflows/scripts-tests.yml"]
   pull_request:
-    paths: ["scripts/**", "backend/models/schema.sql", ".github/workflows/scripts-tests.yml"]
+    paths: ["scripts/**", "backend/models/schema.sql", "backend/models/migrations/**", ".github/workflows/scripts-tests.yml"]
 defaults:
   run:
     working-directory: scripts

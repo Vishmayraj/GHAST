@@ -20,7 +20,7 @@ This is the current Stage 1 pipeline, based on the code in this checkout:
 From C:\Projects\GHAST\infra\docker, copy .env.example to .env, set the AIS
 Stream key, then run docker compose up -d. The compose stack starts
 TimescaleDB/PostGIS, MinIO, and ingestion; ingestion/storage.py applies
-backend/models/schema.sql on startup.
+the numbered migrations in backend/models/migrations/ on startup.
 
 Historical data is separate from live collection. Put MarineCadastre files named
 ais-2026-04-*.csv under data/raw, set POSTGRES_DSN if the default is not right,
@@ -159,6 +159,6 @@ bounded agent logic, incident schema, and live scorer polling-to-incident path.
 Implemented but requiring infrastructure: live scoring, checkpoint loading, and
 incident persistence. Experimental: threshold calibration, freeze/replay
 corroboration, and the single-vote confidence policy. Not implemented: a running
-backend API despite its README scaffold, dashboard, and
-automated database migrations. External live operation needs the AIS feed,
+backend API despite its README scaffold, and a dashboard
+that has been opened against a real database. External live operation needs the AIS feed,
 database, checkpoint, and (for reports) Groq key.

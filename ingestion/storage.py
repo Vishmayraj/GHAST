@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,9 +23,10 @@ from collector.config import IngestionConfig
 
 logger = logging.getLogger(__name__)
 
-# backend/models/ owns the DB schema per the repo layout (ImplementationPlans/old/Sem5IP.md
-# section 6); this ingestion service just applies it on startup.
-_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "backend" / "models" / "schema.sql"
+# backend/models/migrations/ owns the DB schema; this service runs the migrator on startup
+# (scripts/migrate.py, copied into the image next to the migrations).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from migrate import run_migrations  # noqa: E402
 
 _INSERT_POSITION_SQL = """
     INSERT INTO vessel_position (
@@ -37,6 +39,7 @@ _INSERT_POSITION_SQL = """
         $5, $6, ST_SetSRID(ST_MakePoint($6, $5), 4326)::geography,
         $7, $8, $9, $10, $11, $12, $13
     )
+    ON CONFLICT DO NOTHING
 """
 
 _UPSERT_STATIC_SQL = """
@@ -63,13 +66,9 @@ class TimescaleWriter:
 
     async def connect(self) -> None:
         self._pool = await asyncpg.create_pool(self._dsn, min_size=1, max_size=5)
-        if _SCHEMA_PATH.exists():
-            async with self._pool.acquire() as conn:
-                await conn.execute(_SCHEMA_PATH.read_text())
-        else:
-            logger.warning(
-                "Schema file not found at %s; assuming tables already exist", _SCHEMA_PATH
-            )
+        applied = await run_migrations(self._dsn)
+        if applied:
+            logger.info("Applied migrations: %s", ", ".join(applied))
 
     async def close(self) -> None:
         if self._pool is not None:
